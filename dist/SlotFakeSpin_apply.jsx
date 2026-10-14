@@ -372,7 +372,7 @@ var SFS = SFS || {};
             if (def.hasOwnProperty(k) && src.hasOwnProperty(k) && src[k] !== null && src[k] !== undefined) {
                 var dv = def[k], v = src[k];
                 if (typeof dv === "number") { out[k] = U.toNumber(v, dv); }
-                else if (typeof dv === "boolean") { out[k] = !!v; }
+                else if (typeof dv === "boolean") { out[k] = typeof v === "string" ? /^(true|1|yes|on)$/i.test(U.trim(v)) : !!v; }
                 else { out[k] = String(v); }
             }
         }
@@ -508,6 +508,21 @@ var SFS = SFS || {};
             prevStop = stop;
         }
         return reels;
+    };
+
+    S.isAbsolutePath = function (p) {
+        return /^([A-Za-z]:[\\\/]|[\\\/]|~)/.test(String(p || ""));
+    };
+
+    S.absolutizePaths = function (cfg, baseDir) {
+        function fix(p) {
+            if (!p || S.isAbsolutePath(p) || !baseDir) { return p; }
+            return String(baseDir).replace(/[\\\/]+$/, "") + "/" + String(p).replace(/^\.[\\\/]/, "");
+        }
+        for (var i = 0; i < cfg.symbols.length; i++) { cfg.symbols[i].path = fix(cfg.symbols[i].path); }
+        cfg.frame.path = fix(cfg.frame.path);
+        cfg.lineStyle.cellPath = fix(cfg.lineStyle.cellPath);
+        return cfg;
     };
 
     S.symbolNames = function (cfg) {
@@ -2006,7 +2021,14 @@ function autoShots(plan, offset) {
         }
     }
     shots.sort(function (a, b) { return a.t - b.t; });
-    return shots;
+
+    var out = [];
+    for (i = 0; i < shots.length; i++) {
+        var last = out[out.length - 1];
+        if (last && Math.abs(last.t - shots[i].t) < 1e-6) { last.label += " / " + shots[i].label; }
+        else { out.push({ t: shots[i].t, label: shots[i].label }); }
+    }
+    return out;
 }
 
 try {
@@ -2015,7 +2037,7 @@ try {
         if (!pf) { throw new Error("\u5DF2\u53D6\u6D88"); }
         job = { preset: pf.fsName, mode: "auto" };
     }
-    var cfg = SFS.normalizeConfig(SFS.json.parse(readText(job.preset)));
+    var cfg = SFS.absolutizePaths(SFS.normalizeConfig(SFS.json.parse(readText(job.preset))), new File(job.preset).parent.fsName);
     var target = job.comp ? SFS.ae.findComp(job.comp) : SFS.ae.activeComp();
     if (job.comp && !target) { throw new Error("\u627E\u4E0D\u5230\u5408\u6210\u300C" + job.comp + "\u300D"); }
     var mode = job.mode || "auto";

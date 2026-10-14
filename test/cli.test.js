@@ -68,6 +68,12 @@ test("lines --detect：偵測連線並排顯示時間", () => {
   sfs(["lines", "p.json", "--clear", "--detect"]);
 });
 
+test("set：改 lineGen 會重新排連線時間", () => {
+  sfs(["set", "p.json", "lineGen.mode=all", "lineGen.allTime=1.8", "lineGen.delay=0.2"]);
+  assert.ok(preset().lines.every((l) => l.shows === "0.2+1.8"));
+  sfs(["set", "p.json", "lineGen.mode=all_each", "lineGen.allTime=1.2", "lineGen.delay=0.3"]);
+});
+
 test("set：改快速節奏會自動重新產生各輪；改尺寸會補盤面", () => {
   sfs(["set", "p.json", "spin.stopOrder=5,4,3,2,1", "spin.speeds=14,16,18,22,26"]);
   let p = preset();
@@ -118,6 +124,25 @@ test("check：時間表、文字時間軸、標記；--json；錯誤時非 0", (
 test("show：摘要", () => {
   const out = sfs(["show", "p.json"]);
   assert.ok(/結果盤面/.test(out) && /SCATTER\*/.test(out) && /連線/.test(out));
+});
+
+test("範例設定檔：符號用相對路徑，從任何目錄都能用", () => {
+  const ex = path.join(ROOT, "examples", "freegame.json");
+  const raw = JSON.parse(fs.readFileSync(ex, "utf8"));
+  assert.ok(raw.symbols.every((s) => /^symbols\//.test(s.path)), "example uses relative paths");
+  const out = sfs(["check", ex]);
+  assert.ok(/✓ 設定正確/.test(out), out);
+  // 整個資料夾搬到別處：修改後仍保持相對路徑
+  const dir = path.join(tmp, "moved");
+  fs.mkdirSync(path.join(dir, "symbols"), { recursive: true });
+  fs.readdirSync(SYMBOL_DIR).forEach((f) => fs.copyFileSync(path.join(SYMBOL_DIR, f), path.join(dir, "symbols", f)));
+  fs.copyFileSync(ex, path.join(dir, "fg.json"));
+  sfs(["set", path.join(dir, "fg.json"), "spin.seed=7"]);
+  const moved = JSON.parse(fs.readFileSync(path.join(dir, "fg.json"), "utf8"));
+  assert.strictEqual(moved.spin.seed, 7);
+  assert.ok(moved.symbols.every((s) => /^symbols\//.test(s.path)), moved.symbols[0].path);
+  // init 指到別處的符號資料夾時維持絕對路徑
+  assert.ok(path.isAbsolute(preset().symbols[0].path));
 });
 
 test("ae --dry-run：產生啟動腳本（ASCII、帶工作參數）", () => {
@@ -185,6 +210,17 @@ test("apply：新建 → 自動更新同一個盤面 → 指定合成 / 檢查�
   assert.ok(!res.ok && /找不到要更新的盤面/.test(res.errors[0]));
   void empty;
   assert.strictEqual(ctx.app._undo, 0);
+});
+
+test("apply：設定檔裡的相對路徑以設定檔位置為準", () => {
+  const ctx = newContext();
+  const main = ctx.app.project.items.addComp("Main", 1920, 1080, 1, 12, 30);
+  ctx.app.project.activeItem = main;
+  const res = runApply(ctx, { preset: path.join(ROOT, "examples", "freegame.json"), mode: "new", result: path.join(tmp, "apply", "rel.json"), frames: "none" });
+  deq(res.errors, []);
+  const imported = ctx.app.project._items.filter((it) => it.mainSource && it.mainSource.file);
+  assert.strictEqual(imported.length, 10);
+  assert.ok(imported.every((it) => it.mainSource.file.fsName.indexOf(path.join(ROOT, "examples", "symbols")) === 0));
 });
 
 test("apply：沒有工作參數時跳出對話框選設定檔", () => {

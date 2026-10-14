@@ -78,6 +78,8 @@ test("normalizeConfig 補齊欄位、修正型別、調整盤面、產生各輪�
   assert.strictEqual(c.layout.bogus, undefined);
   assert.strictEqual(c.spin.firstStop, 1);
   assert.strictEqual(c.spin.motionBlur, false);
+  assert.strictEqual(SFS.normalizeConfig({ spin: { motionBlur: "false", autoRhythm: "on" } }).spin.motionBlur, false);
+  assert.strictEqual(SFS.normalizeConfig({ spin: { motionBlur: "false", autoRhythm: "on" } }).spin.autoRhythm, true);
   assert.strictEqual(c.spin.decelCurve, "standard");
   deq(c.startBoard, [["A", "A"], ["B", ""], ["", ""], ["", ""]]);
   assert.strictEqual(c.endBoard.length, 4);

@@ -1482,7 +1482,7 @@
             var txt = f.read();
             f.close();
             var cfg;
-            try { cfg = S.normalizeConfig(S.json.parse(txt)); } catch (e) {
+            try { cfg = S.absolutizePaths(S.normalizeConfig(S.json.parse(txt)), f.parent.fsName); } catch (e) {
                 alert("設定檔格式錯誤：" + e.message, S.NAME);
                 return;
             }

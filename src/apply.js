@@ -52,7 +52,14 @@ function autoShots(plan, offset) {
         }
     }
     shots.sort(function (a, b) { return a.t - b.t; });
-    return shots;
+    // 同一時間的畫面只留一張，標籤合併
+    var out = [];
+    for (i = 0; i < shots.length; i++) {
+        var last = out[out.length - 1];
+        if (last && Math.abs(last.t - shots[i].t) < 1e-6) { last.label += " / " + shots[i].label; }
+        else { out.push({ t: shots[i].t, label: shots[i].label }); }
+    }
+    return out;
 }
 
 try {
@@ -61,7 +68,7 @@ try {
         if (!pf) { throw new Error("已取消"); }
         job = { preset: pf.fsName, mode: "auto" };
     }
-    var cfg = SFS.normalizeConfig(SFS.json.parse(readText(job.preset)));
+    var cfg = SFS.absolutizePaths(SFS.normalizeConfig(SFS.json.parse(readText(job.preset))), new File(job.preset).parent.fsName);
     var target = job.comp ? SFS.ae.findComp(job.comp) : SFS.ae.activeComp();
     if (job.comp && !target) { throw new Error("找不到合成「" + job.comp + "」"); }
     var mode = job.mode || "auto";

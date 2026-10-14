@@ -77,11 +77,30 @@ function load(file) {
   if (!fs.existsSync(file)) fail("找不到設定檔 " + file);
   let raw;
   try { raw = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")); } catch (e) { fail("設定檔不是合法 JSON：" + e.message); }
-  return S.normalizeConfig(raw);
+  const cfg = S.normalizeConfig(raw);
+  // 相對路徑以設定檔所在資料夾為基準
+  const base = path.dirname(path.resolve(file));
+  cfg.symbols.forEach((s) => { if (s.path && !path.isAbsolute(s.path)) s.path = path.resolve(base, s.path); });
+  ["frame.path", "lineStyle.cellPath"].forEach((k) => {
+    const [g, f] = k.split(".");
+    if (cfg[g][f] && !path.isAbsolute(cfg[g][f])) cfg[g][f] = path.resolve(base, cfg[g][f]);
+  });
+  return cfg;
 }
 
+// 存檔時，在設定檔資料夾底下的素材寫成相對路徑（整個資料夾搬到別台電腦也能用）
 function save(file, cfg) {
-  fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
+  const base = path.dirname(path.resolve(file));
+  const rel = (p) => {
+    if (!p || !path.isAbsolute(p)) return p;
+    const r = path.relative(base, p);
+    return r && !r.startsWith("..") && !path.isAbsolute(r) ? r.split(path.sep).join("/") : p;
+  };
+  const out = JSON.parse(JSON.stringify(cfg));
+  out.symbols.forEach((s) => { s.path = rel(s.path); });
+  out.frame.path = rel(out.frame.path);
+  out.lineStyle.cellPath = rel(out.lineStyle.cellPath);
+  fs.writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
 }
 
 function textArg(v) {
@@ -216,7 +235,7 @@ function setPath(obj, keyPath, value) {
 function cmdSet(file, pairs) {
   let cfg = load(file);
   if (!pairs.length) fail("用法：set <preset> key.path=value ...");
-  let touchedSpin = false, touchedSize = false;
+  let touchedSpin = false, touchedSize = false, touchedLineGen = false;
   for (const p of pairs) {
     const i = p.indexOf("=");
     if (i < 0) fail("格式是 key.path=value：" + p);
@@ -224,6 +243,7 @@ function cmdSet(file, pairs) {
     if (/^(symbols|reels|lines|startBoard|endBoard)\b/.test(k)) fail(k + " 請用專用指令（symbol / reel / lines / board）");
     setPath(cfg, k, v);
     if (k.startsWith("spin.")) touchedSpin = true;
+    if (k.startsWith("lineGen.")) touchedLineGen = true;
     if (k === "layout.reels" || k === "layout.rows") touchedSize = true;
   }
   const before = cfg.layout.reels;
@@ -236,10 +256,15 @@ function cmdSet(file, pairs) {
   } else if (touchedSpin && cfg.spin.autoRhythm) {
     cfg.reels = S.generateReels(cfg);
   }
+  if (touchedLineGen && cfg.lines.length) S.lines.applyTiming(cfg.lines, cfg.lineGen);
   save(file, cfg);
   console.log("已更新 " + pairs.join(" ") + (touchedSpin && cfg.spin.autoRhythm ? "（已重新產生各輪）" : "") +
     (touchedSize && before !== cfg.layout.reels ? "（盤面尺寸改變，各輪已重新產生、空格已亂數補上）" : ""));
   if (touchedSpin || touchedSize) printReels(cfg);
+  if (touchedLineGen && cfg.lines.length) {
+    console.log("已依 lineGen 重新排連線顯示時間：");
+    cfg.lines.forEach((l, i) => console.log("  " + (i + 1) + ". " + l.pattern + " 顯示 " + l.shows));
+  }
 }
 
 const REEL_KEYS = Object.keys(S.reelDefaults());
@@ -449,7 +474,15 @@ function keyShots(plan) {
     }
   });
   plan.lines.forEach((pl, i) => pl.shows.forEach((s, k) => shots.push({ t: (s.start + s.end) / 2, label: "LINE " + (i + 1) + (pl.shows.length > 1 ? " #" + (k + 1) : "") })));
-  return shots.sort((a, b) => a.t - b.t);
+  shots.sort((a, b) => a.t - b.t);
+  // 同一時間的畫面只留一張，標籤合併
+  const out = [];
+  shots.forEach((s) => {
+    const last = out[out.length - 1];
+    if (last && Math.abs(last.t - s.t) < 1e-6) last.label += " / " + s.label;
+    else out.push({ t: s.t, label: s.label });
+  });
+  return out;
 }
 
 function findPython() {

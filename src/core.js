@@ -391,7 +391,7 @@ var SFS = SFS || {};
             if (def.hasOwnProperty(k) && src.hasOwnProperty(k) && src[k] !== null && src[k] !== undefined) {
                 var dv = def[k], v = src[k];
                 if (typeof dv === "number") { out[k] = U.toNumber(v, dv); }
-                else if (typeof dv === "boolean") { out[k] = !!v; }
+                else if (typeof dv === "boolean") { out[k] = typeof v === "string" ? /^(true|1|yes|on)$/i.test(U.trim(v)) : !!v; }
                 else { out[k] = String(v); }
             }
         }
@@ -533,6 +533,22 @@ var SFS = SFS || {};
             prevStop = stop;
         }
         return reels;
+    };
+
+    // 設定檔裡的相對路徑（例如 symbols/A.png）以設定檔所在資料夾為基準轉成絕對路徑
+    S.isAbsolutePath = function (p) {
+        return /^([A-Za-z]:[\\\/]|[\\\/]|~)/.test(String(p || ""));
+    };
+
+    S.absolutizePaths = function (cfg, baseDir) {
+        function fix(p) {
+            if (!p || S.isAbsolutePath(p) || !baseDir) { return p; }
+            return String(baseDir).replace(/[\\\/]+$/, "") + "/" + String(p).replace(/^\.[\\\/]/, "");
+        }
+        for (var i = 0; i < cfg.symbols.length; i++) { cfg.symbols[i].path = fix(cfg.symbols[i].path); }
+        cfg.frame.path = fix(cfg.frame.path);
+        cfg.lineStyle.cellPath = fix(cfg.lineStyle.cellPath);
+        return cfg;
     };
 
     S.symbolNames = function (cfg) {

@@ -372,7 +372,7 @@ var SFS = SFS || {};
             if (def.hasOwnProperty(k) && src.hasOwnProperty(k) && src[k] !== null && src[k] !== undefined) {
                 var dv = def[k], v = src[k];
                 if (typeof dv === "number") { out[k] = U.toNumber(v, dv); }
-                else if (typeof dv === "boolean") { out[k] = !!v; }
+                else if (typeof dv === "boolean") { out[k] = typeof v === "string" ? /^(true|1|yes|on)$/i.test(U.trim(v)) : !!v; }
                 else { out[k] = String(v); }
             }
         }
@@ -508,6 +508,21 @@ var SFS = SFS || {};
             prevStop = stop;
         }
         return reels;
+    };
+
+    S.isAbsolutePath = function (p) {
+        return /^([A-Za-z]:[\\\/]|[\\\/]|~)/.test(String(p || ""));
+    };
+
+    S.absolutizePaths = function (cfg, baseDir) {
+        function fix(p) {
+            if (!p || S.isAbsolutePath(p) || !baseDir) { return p; }
+            return String(baseDir).replace(/[\\\/]+$/, "") + "/" + String(p).replace(/^\.[\\\/]/, "");
+        }
+        for (var i = 0; i < cfg.symbols.length; i++) { cfg.symbols[i].path = fix(cfg.symbols[i].path); }
+        cfg.frame.path = fix(cfg.frame.path);
+        cfg.lineStyle.cellPath = fix(cfg.lineStyle.cellPath);
+        return cfg;
     };
 
     S.symbolNames = function (cfg) {
@@ -3418,7 +3433,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             var txt = f.read();
             f.close();
             var cfg;
-            try { cfg = S.normalizeConfig(S.json.parse(txt)); } catch (e) {
+            try { cfg = S.absolutizePaths(S.normalizeConfig(S.json.parse(txt)), f.parent.fsName); } catch (e) {
                 alert("\u8A2D\u5B9A\u6A94\u683C\u5F0F\u932F\u8AA4\uFF1A" + e.message, S.NAME);
                 return;
             }
