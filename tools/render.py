@@ -144,6 +144,9 @@ def draw_line(img, ln):
                              c[0] + ln["cellW"] / 2 - bw / 2, c[1] + ln["cellH"] / 2 - bw / 2],
                             radius=int(min(20, ln["cellW"] / 6)), outline=col + (255,), width=max(1, int(bw)))
     pts = ln["points"]
+    if len(pts) < 2:
+        img.alpha_composite(over)
+        return
     seg = [math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1)]
     total, want = sum(seg), sum(seg) * max(0.0, min(1.0, ln["progress"]))
     drawn, acc = [pts[0]], 0.0

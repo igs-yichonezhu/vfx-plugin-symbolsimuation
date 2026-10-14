@@ -329,7 +329,8 @@ var SFS = SFS || {};
                 fade: 0.1,             // 淡入淡出（秒）
                 hold: 0.15             // 停妥後再留多久（秒）
             },
-            // 連線：{ pattern: "2,2,2,2,2"（每輪第幾列，1 起算）, count: 連幾個, shows: "0.3+1.2, 1.6+0.9"（停妥後開始+長度）, color: "" }
+            // 連線：{ pattern: "2,2,2,2,2"（每輪第幾列，1 起算；0 = 這輪不框）, count: 連幾個,
+            //        shows: "0.3+1.2, 1.6+0.9"（停妥後開始+長度）, color: "", boxOnly: 只框格子不畫線（Scatter） }
             lines: [],
             lineSet: {
                 paylines: "",          // 線型表（每行一條），空白 = 內建
@@ -379,7 +380,7 @@ var SFS = SFS || {};
     };
 
     S.lineDefaults = function () {
-        return { pattern: "", count: 3, shows: "", color: "" };
+        return { pattern: "", count: 3, shows: "", color: "", boxOnly: false };
     };
 
     // 依預設值的型別複製欄位，忽略未知欄位
@@ -675,16 +676,31 @@ var SFS = SFS || {};
     var LN = S.lines = {};
 
     // 線型 "2,2,2,2,2" -> [1,1,1,1,1]（0 起算）；錯誤回傳 null
-    LN.parsePattern = function (text, reels, rows) {
-        var nums = S.parseNumbers(text);
-        if (nums.length !== reels) { return null; }
-        var out = [];
-        for (var i = 0; i < nums.length; i++) {
-            var v = Math.round(nums[i]);
-            if (v !== nums[i] || v < 1 || v > rows) { return null; }
-            out.push(v - 1);
+    // allowGaps：0 或 - 代表這輪沒有格子（-1），用在 Scatter 等「只框格子、不畫線」的中獎
+    LN.parsePattern = function (text, reels, rows, allowGaps) {
+        var parts = String(text || "").replace(/-/g, " 0 ").split(/[\s,\uFF0C;]+/), nums = [], i;
+        for (i = 0; i < parts.length; i++) {
+            if (parts[i] === "") { continue; }
+            var n = parseFloat(parts[i]);
+            if (isNaN(n)) { return null; }
+            nums.push(n);
         }
-        return out;
+        if (nums.length !== reels) { return null; }
+        var out = [], cells = 0;
+        for (i = 0; i < nums.length; i++) {
+            var v = Math.round(nums[i]);
+            if (v !== nums[i]) { return null; }
+            if (v === 0 && allowGaps) { out.push(-1); continue; }
+            if (v < 1 || v > rows) { return null; }
+            out.push(v - 1);
+            cells++;
+        }
+        return cells ? out : null;
+    };
+
+    LN.isHighlight = function (pat) {
+        for (var i = 0; i < pat.length; i++) { if (pat[i] < 0) { return true; } }
+        return false;
     };
 
     // "0.3+1.2, 1.6+0.9" -> [{start:0.3,dur:1.2},{start:1.6,dur:0.9}]；錯誤回傳 null
@@ -785,6 +801,19 @@ var SFS = SFS || {};
             if (count >= minCount) {
                 found.push({ pattern: line.join(","), count: count, symbol: target, payline: i + 1 });
             }
+        }
+        // 觸發型（Scatter）不靠線：數到觸發數就框住所有觸發符號
+        var trig = S.parseNames(cfg.antRule.symbols), need = Math.round(cfg.antRule.count);
+        if (trig.length && need > 0) {
+            var pat = [], n = 0, sym = "";
+            for (var r = 0; r < L.reels; r++) {
+                var hit = 0;
+                for (var y = 0; y < L.rows; y++) {
+                    if (U.indexOf(trig, b[r][y]) >= 0) { if (!hit) { hit = y + 1; sym = b[r][y]; } n++; }
+                }
+                pat.push(hit);
+            }
+            if (n >= need) { found.push({ pattern: pat.join(","), count: n, symbol: sym, payline: 0, scatter: true, boxOnly: true }); }
         }
         return { lines: found, errors: pl.errors };
     };
@@ -957,10 +986,12 @@ var SFS = SFS || {};
         }
         for (i = 0; i < cfg.lines.length; i++) {
             var ln = cfg.lines[i], lt = "連線 " + (i + 1) + "：";
-            if (!LN.parsePattern(ln.pattern, L.reels, L.rows)) {
-                e.push(lt + "線型要有 " + L.reels + " 個 1~" + L.rows + " 的數字（每輪第幾列），目前是「" + ln.pattern + "」");
+            var lp = LN.parsePattern(ln.pattern, L.reels, L.rows, true);
+            if (!lp) {
+                e.push(lt + "線型要有 " + L.reels + " 個 1~" + L.rows + " 的數字（每輪第幾列；0 = 這輪不框），目前是「" + ln.pattern + "」");
+            } else if (!ln.boxOnly && !LN.isHighlight(lp) && (ln.count < 1 || ln.count > L.reels)) {
+                e.push(lt + "連線數要在 1~" + L.reels + " 之間");
             }
-            if (ln.count < 1 || ln.count > L.reels) { e.push(lt + "連線數要在 1~" + L.reels + " 之間"); }
             var shows = LN.parseShows(ln.shows);
             if (!shows) { e.push(lt + "顯示時間格式是「開始+長度」，例如 0.3+1.2, 1.6+0.9"); }
             else if (!shows.length) { e.push(lt + "沒有設定顯示時間"); }
@@ -1158,15 +1189,20 @@ var SFS = SFS || {};
         // 連線
         for (i = 0; i < cfg.lines.length; i++) {
             var ln = cfg.lines[i];
-            var pat = LN.parsePattern(ln.pattern, reels, rows);
+            var pat = LN.parsePattern(ln.pattern, reels, rows, true);
             var shows = LN.parseShows(ln.shows);
             if (!pat || !shows || !shows.length) {
                 errors.push("連線 " + (i + 1) + " 設定錯誤");
                 continue;
             }
+            var highlight = !!ln.boxOnly || LN.isHighlight(pat);
             var count = Math.round(U.clamp(ln.count, 1, reels));
             var cells = [], points = [], r;
             for (r = 0; r < reels; r++) {
+                if (highlight) {
+                    if (pat[r] >= 0) { cells.push([r, pat[r]]); }
+                    continue;
+                }
                 if (r < count) { cells.push([r, pat[r]]); }
                 if (cfg.lineStyle.full || r < count) { points.push(S.cellCenter(L, r, pat[r])); }
             }
@@ -1184,7 +1220,7 @@ var SFS = SFS || {};
                 plan.markers.push({ t: st, label: "LINE " + (i + 1) });
                 if (en > plan.endTime) { plan.endTime = en; }
             }
-            plan.lines.push({ index: i, cells: cells, points: points, shows: abs, color: S.lineColor(ln, i), pattern: pat });
+            plan.lines.push({ index: i, cells: cells, points: points, shows: abs, color: S.lineColor(ln, i), pattern: pat, highlight: highlight });
         }
         if (plan.reels.length === reels) {
             plan.markers.push({ t: plan.allSettled, label: "ALL SETTLED" });

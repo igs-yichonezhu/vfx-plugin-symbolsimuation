@@ -54,12 +54,18 @@ test("suggest --apply：Scatter 差一顆 → 第 4、5 輪期待 + 繞框", () 
 test("lines --detect：偵測連線並排顯示時間", () => {
   const out = sfs(["lines", "p.json", "--detect"]);
   assert.ok(/SEVEN 連 4/.test(out), out);
+  assert.ok(/SCATTER × 3（框格子 0,1,3,0,1）/.test(out), out);
   const p = preset();
-  assert.strictEqual(p.lines.length, 1);
+  assert.strictEqual(p.lines.length, 2);
   assert.strictEqual(p.lines[0].shows, "0.3+1.2, 1.6+0.9");
+  assert.strictEqual(p.lines[1].shows, "0.3+1.2, 2.6+0.9");
   sfs(["lines", "p.json", "--add", "1,2,3,2,1:3:0.5+1"]);
-  assert.strictEqual(preset().lines.length, 2);
+  assert.strictEqual(preset().lines.length, 3);
   sfs(["lines", "p.json", "--add", "1,2,9,2,1:3"], true);
+  sfs(["lines", "p.json", "--add", "1,1,1,1,1:box:0+1"]);
+  const p2 = preset();
+  assert.ok(p2.lines[1].boxOnly && p2.lines[3].boxOnly && !p2.lines[0].boxOnly);
+  sfs(["lines", "p.json", "--clear", "--detect"]);
 });
 
 test("set：改快速節奏會自動重新產生各輪；改尺寸會補盤面", () => {

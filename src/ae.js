@@ -463,12 +463,15 @@
     // ---------------- 連線 ----------------
     function buildLine(board, pl, cfg, plan, cellAsset) {
         var L = cfg.layout, LS = cfg.lineStyle, i, k;
-        var lyr = newShapeLayer(board, "Line " + (pl.index + 1));
-        addGroup(lyr, "Line");
-        addPath(lyr, "Line", pl.points);
-        addStroke(lyr, "Line", pl.color, Math.max(1, LS.width));
-        addTrim(lyr, "Line");
-        if (LS.boxes && !cellAsset) {
+        var lyr = newShapeLayer(board, (pl.highlight ? "Highlight " : "Line ") + (pl.index + 1));
+        var hasPath = pl.points.length >= 2;
+        if (hasPath) {
+            addGroup(lyr, "Line");
+            addPath(lyr, "Line", pl.points);
+            addStroke(lyr, "Line", pl.color, Math.max(1, LS.width));
+            addTrim(lyr, "Line");
+        }
+        if ((LS.boxes || pl.highlight) && !cellAsset) {
             addGroup(lyr, "Boxes");
             for (i = 0; i < pl.cells.length; i++) {
                 addRect(lyr, "Boxes", [L.cellW - LS.boxWidth, L.cellH - LS.boxWidth],
@@ -480,19 +483,19 @@
         lyr.label = 13;
 
         // 結構全部加完才取屬性（之前的參照可能已失效）
-        var trimEnd = vecs(lyr, "Line").property("ADBE Vector Filter - Trim").property("ADBE Vector Trim End");
+        var trimEnd = hasPath ? vecs(lyr, "Line").property("ADBE Vector Filter - Trim").property("ADBE Vector Trim End") : null;
         var op = lyr.transform.opacity;
         for (k = 0; k < pl.shows.length; k++) {
             var sh = pl.shows[k];
             var draw = Math.min(Math.max(0, LS.drawTime), (sh.end - sh.start) / 2);
-            if (draw > 0) {
+            if (trimEnd && draw > 0) {
                 key(trimEnd, sh.start, 0);
                 key(trimEnd, sh.start + draw, 100, true);
             }
             key(op, sh.start, 100, true);
             key(op, sh.end, 0, true);
         }
-        if (!trimEnd.numKeys) { trimEnd.setValue(100); }
+        if (trimEnd && !trimEnd.numKeys) { trimEnd.setValue(100); }
         lyr.inPoint = pl.shows[0].start;
         lyr.outPoint = pl.shows[pl.shows.length - 1].end;
 

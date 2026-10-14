@@ -281,6 +281,20 @@ test("連線：路徑、畫線 Trim、顯示 / 隱藏、中獎框、符號跳動
   assert.strictEqual(new Set(out.boardLayer.property("ADBE Marker").keys.map((k) => k.t)).size, marks.length);
 });
 
+test("連線：Scatter 格子框只有框和跳動、沒有線", () => {
+  const env = aeSetup();
+  const cfg = cfgFromImport(env, importSamples(env));
+  cfg.lines = [{ pattern: "3,0,1,0,0", count: 2, shows: "0.2+1.5", color: "#AA00FF" }];
+  const out = env.S.ae.build(cfg, {});
+  deq(out.errors, []);
+  const hl = byName(out.boardComp, "Highlight 1");
+  assert.ok(hl);
+  deq(hl._contents.children.map((c) => c.name), ["Boxes"]);
+  assert.strictEqual(vectors(hl, "Boxes").filter((c) => c.matchName === "ADBE Vector Shape - Rect").length, 2);
+  assert.strictEqual(out.boardComp._layers.filter((l) => /^Win R/.test(l.name)).length, 2);
+  assert.ok(byName(out.boardComp, "Win R1-3_" + cfg.endBoard[0][2]));
+});
+
 test("連線：自訂中獎格素材每格每次出現各放一個", () => {
   const env = aeSetup();
   const res = importSamples(env);
@@ -308,7 +322,7 @@ test("更新選取盤面：重建內容、移除舊轉輪合成與 null、標記
   assert.strictEqual(env.S.ae.selectedBoardLayer(), first.boardLayer);
 
   const cfg2 = env.S.ae.readBoardConfig(first.boardLayer);
-  deq(cfg2.lines, cfg.lines);
+  deq(cfg2.lines, cfg.lines.map((l) => Object.assign({ boxOnly: false }, l)));
   cfg2.layout.reels = 4;
   cfg2.layout.rows = 4;
   cfg2.startBoard = env.S.board.create(4, 4, "BAR");

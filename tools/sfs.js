@@ -33,7 +33,8 @@ const HELP = `SlotFakeSpin CLI
 期待感 / 連線
   suggest <preset> [--apply]      依結果盤面 + 停輪順序算出期待輪（--apply 寫入）
   lines <preset> [--detect] [--clear] [--timing] [--add 線型:連數[:顯示]]
-                                  例：--add 1,2,3,2,1:5:0.3+1.2
+                                  例：--add 1,2,3,2,1:5:0.3+1.2；線型裡的 0 = 這輪不框
+                                  連數寫 box = 只框格子不畫線（Scatter）：--add 2,0,1,0,2:box
 
 檢查 / 預覽
   check <preset> [--fps 30] [--json]
@@ -154,7 +155,7 @@ function cmdShow(file) {
   printReels(cfg);
   if (cfg.lines.length) {
     console.log("\n連線：");
-    cfg.lines.forEach((l, i) => console.log("  " + (i + 1) + ". 線型 " + l.pattern + " 連 " + l.count + " 顯示 " + l.shows + (l.color ? " " + l.color : "")));
+    cfg.lines.forEach((l, i) => console.log("  " + (i + 1) + ". 線型 " + l.pattern + (l.boxOnly ? " 只框格子" : " 連 " + l.count) + " 顯示 " + l.shows + (l.color ? " " + l.color : "")));
   }
 }
 
@@ -231,7 +232,7 @@ function cmdSet(file, pairs) {
     const pool = S.fillerPool(cfg), rng = new S.Rng(Date.now() % 2147483000 + 1);
     for (const b of [cfg.startBoard, cfg.endBoard]) b.forEach((col) => col.forEach((v, y) => { if (!v) col[y] = rng.pick(pool); }));
     cfg.reels = S.generateReels(cfg);
-    cfg.lines = cfg.lines.filter((l) => S.lines.parsePattern(l.pattern, cfg.layout.reels, cfg.layout.rows));
+    cfg.lines = cfg.lines.filter((l) => S.lines.parsePattern(l.pattern, cfg.layout.reels, cfg.layout.rows, true));
   } else if (touchedSpin && cfg.spin.autoRhythm) {
     cfg.reels = S.generateReels(cfg);
   }
@@ -300,21 +301,23 @@ function cmdLines(file, opt) {
   if (opt.detect) {
     const res = S.lines.detect(cfg);
     if (res.errors.length) fail(res.errors.join("\n"));
-    cfg.lines = res.lines.map((l) => ({ pattern: l.pattern, count: l.count, shows: "", color: "" }));
+    cfg.lines = res.lines.map((l) => ({ pattern: l.pattern, count: l.count, shows: "", color: "", boxOnly: !!l.boxOnly }));
     S.lines.applyTiming(cfg.lines, cfg.lineGen);
-    res.lines.forEach((l) => console.log("偵測到：線 " + l.payline + "（" + l.pattern + "）" + l.symbol + " 連 " + l.count));
+    res.lines.forEach((l) => console.log(l.scatter ? "偵測到：" + l.symbol + " × " + l.count + "（框格子 " + l.pattern + "）"
+      : "偵測到：線 " + l.payline + "（" + l.pattern + "）" + l.symbol + " 連 " + l.count));
     if (!res.lines.length) console.log("結果盤面沒有連線");
   }
   if (opt.add && opt.add !== true) {
     const [pattern, count, shows] = String(opt.add).split(":");
-    if (!S.lines.parsePattern(pattern, L.reels, L.rows)) fail("線型要有 " + L.reels + " 個 1~" + L.rows + " 的數字：" + pattern);
-    cfg.lines.push({ pattern, count: Number(count || L.reels), shows: shows || "", color: "" });
+    if (!S.lines.parsePattern(pattern, L.reels, L.rows, true)) fail("線型要有 " + L.reels + " 個 1~" + L.rows + " 的數字（0 = 這輪不框）：" + pattern);
+    const boxOnly = /^box$/i.test(count || "");
+    cfg.lines.push({ pattern, count: boxOnly ? L.reels : Number(count || L.reels), shows: shows || "", color: "", boxOnly });
     if (!shows) S.lines.applyTiming(cfg.lines, cfg.lineGen);
   }
   if (opt.timing) S.lines.applyTiming(cfg.lines, cfg.lineGen);
   const norm = S.normalizeConfig(cfg);
   save(file, norm);
-  norm.lines.forEach((l, i) => console.log("  " + (i + 1) + ". 線型 " + l.pattern + " 連 " + l.count + " 顯示 " + l.shows));
+  norm.lines.forEach((l, i) => console.log("  " + (i + 1) + ". 線型 " + l.pattern + (l.boxOnly ? " 只框格子" : " 連 " + l.count) + " 顯示 " + l.shows));
 }
 
 function asciiTimeline(plan, width) {
@@ -425,7 +428,7 @@ function sceneFor(cfg, fps, shots, outScale) {
     const lines = plan.lines.filter((pl) => pl.shows.some((s) => t >= s.start && t < s.end)).map((pl) => {
       const s = pl.shows.find((x) => t >= x.start && t < x.end);
       const draw = Math.min(LS.drawTime, (s.end - s.start) / 2);
-      return { points: pl.points, boxes: LS.boxes ? pl.cells.map((c) => S.cellCenter(L, c[0], c[1])) : [], color: S.rgbToHex(pl.color),
+      return { points: pl.points, boxes: LS.boxes || pl.highlight ? pl.cells.map((c) => S.cellCenter(L, c[0], c[1])) : [], color: S.rgbToHex(pl.color),
         width: LS.width, boxW: LS.boxWidth, cellW: L.cellW, cellH: L.cellH, progress: draw > 0 ? Math.min(1, (t - s.start) / draw) : 1 };
     });
     return { t, label, reels, frames: frameOv, wins, lines };

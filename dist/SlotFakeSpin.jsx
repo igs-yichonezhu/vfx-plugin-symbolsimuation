@@ -362,7 +362,7 @@ var SFS = SFS || {};
     };
 
     S.lineDefaults = function () {
-        return { pattern: "", count: 3, shows: "", color: "" };
+        return { pattern: "", count: 3, shows: "", color: "", boxOnly: false };
     };
 
     function copyTyped(def, src) {
@@ -640,16 +640,30 @@ var SFS = SFS || {};
 
     var LN = S.lines = {};
 
-    LN.parsePattern = function (text, reels, rows) {
-        var nums = S.parseNumbers(text);
-        if (nums.length !== reels) { return null; }
-        var out = [];
-        for (var i = 0; i < nums.length; i++) {
-            var v = Math.round(nums[i]);
-            if (v !== nums[i] || v < 1 || v > rows) { return null; }
-            out.push(v - 1);
+    LN.parsePattern = function (text, reels, rows, allowGaps) {
+        var parts = String(text || "").replace(/-/g, " 0 ").split(/[\s,\uFF0C;]+/), nums = [], i;
+        for (i = 0; i < parts.length; i++) {
+            if (parts[i] === "") { continue; }
+            var n = parseFloat(parts[i]);
+            if (isNaN(n)) { return null; }
+            nums.push(n);
         }
-        return out;
+        if (nums.length !== reels) { return null; }
+        var out = [], cells = 0;
+        for (i = 0; i < nums.length; i++) {
+            var v = Math.round(nums[i]);
+            if (v !== nums[i]) { return null; }
+            if (v === 0 && allowGaps) { out.push(-1); continue; }
+            if (v < 1 || v > rows) { return null; }
+            out.push(v - 1);
+            cells++;
+        }
+        return cells ? out : null;
+    };
+
+    LN.isHighlight = function (pat) {
+        for (var i = 0; i < pat.length; i++) { if (pat[i] < 0) { return true; } }
+        return false;
     };
 
     LN.parseShows = function (text) {
@@ -747,6 +761,19 @@ var SFS = SFS || {};
             if (count >= minCount) {
                 found.push({ pattern: line.join(","), count: count, symbol: target, payline: i + 1 });
             }
+        }
+
+        var trig = S.parseNames(cfg.antRule.symbols), need = Math.round(cfg.antRule.count);
+        if (trig.length && need > 0) {
+            var pat = [], n = 0, sym = "";
+            for (var r = 0; r < L.reels; r++) {
+                var hit = 0;
+                for (var y = 0; y < L.rows; y++) {
+                    if (U.indexOf(trig, b[r][y]) >= 0) { if (!hit) { hit = y + 1; sym = b[r][y]; } n++; }
+                }
+                pat.push(hit);
+            }
+            if (n >= need) { found.push({ pattern: pat.join(","), count: n, symbol: sym, payline: 0, scatter: true, boxOnly: true }); }
         }
         return { lines: found, errors: pl.errors };
     };
@@ -901,10 +928,12 @@ var SFS = SFS || {};
         }
         for (i = 0; i < cfg.lines.length; i++) {
             var ln = cfg.lines[i], lt = "\u9023\u7DDA " + (i + 1) + "\uFF1A";
-            if (!LN.parsePattern(ln.pattern, L.reels, L.rows)) {
-                e.push(lt + "\u7DDA\u578B\u8981\u6709 " + L.reels + " \u500B 1~" + L.rows + " \u7684\u6578\u5B57\uFF08\u6BCF\u8F2A\u7B2C\u5E7E\u5217\uFF09\uFF0C\u76EE\u524D\u662F\u300C" + ln.pattern + "\u300D");
+            var lp = LN.parsePattern(ln.pattern, L.reels, L.rows, true);
+            if (!lp) {
+                e.push(lt + "\u7DDA\u578B\u8981\u6709 " + L.reels + " \u500B 1~" + L.rows + " \u7684\u6578\u5B57\uFF08\u6BCF\u8F2A\u7B2C\u5E7E\u5217\uFF1B0 = \u9019\u8F2A\u4E0D\u6846\uFF09\uFF0C\u76EE\u524D\u662F\u300C" + ln.pattern + "\u300D");
+            } else if (!ln.boxOnly && !LN.isHighlight(lp) && (ln.count < 1 || ln.count > L.reels)) {
+                e.push(lt + "\u9023\u7DDA\u6578\u8981\u5728 1~" + L.reels + " \u4E4B\u9593");
             }
-            if (ln.count < 1 || ln.count > L.reels) { e.push(lt + "\u9023\u7DDA\u6578\u8981\u5728 1~" + L.reels + " \u4E4B\u9593"); }
             var shows = LN.parseShows(ln.shows);
             if (!shows) { e.push(lt + "\u986F\u793A\u6642\u9593\u683C\u5F0F\u662F\u300C\u958B\u59CB+\u9577\u5EA6\u300D\uFF0C\u4F8B\u5982 0.3+1.2, 1.6+0.9"); }
             else if (!shows.length) { e.push(lt + "\u6C92\u6709\u8A2D\u5B9A\u986F\u793A\u6642\u9593"); }
@@ -1084,15 +1113,20 @@ var SFS = SFS || {};
 
         for (i = 0; i < cfg.lines.length; i++) {
             var ln = cfg.lines[i];
-            var pat = LN.parsePattern(ln.pattern, reels, rows);
+            var pat = LN.parsePattern(ln.pattern, reels, rows, true);
             var shows = LN.parseShows(ln.shows);
             if (!pat || !shows || !shows.length) {
                 errors.push("\u9023\u7DDA " + (i + 1) + " \u8A2D\u5B9A\u932F\u8AA4");
                 continue;
             }
+            var highlight = !!ln.boxOnly || LN.isHighlight(pat);
             var count = Math.round(U.clamp(ln.count, 1, reels));
             var cells = [], points = [], r;
             for (r = 0; r < reels; r++) {
+                if (highlight) {
+                    if (pat[r] >= 0) { cells.push([r, pat[r]]); }
+                    continue;
+                }
                 if (r < count) { cells.push([r, pat[r]]); }
                 if (cfg.lineStyle.full || r < count) { points.push(S.cellCenter(L, r, pat[r])); }
             }
@@ -1110,7 +1144,7 @@ var SFS = SFS || {};
                 plan.markers.push({ t: st, label: "LINE " + (i + 1) });
                 if (en > plan.endTime) { plan.endTime = en; }
             }
-            plan.lines.push({ index: i, cells: cells, points: points, shows: abs, color: S.lineColor(ln, i), pattern: pat });
+            plan.lines.push({ index: i, cells: cells, points: points, shows: abs, color: S.lineColor(ln, i), pattern: pat, highlight: highlight });
         }
         if (plan.reels.length === reels) {
             plan.markers.push({ t: plan.allSettled, label: "ALL SETTLED" });
@@ -1645,12 +1679,15 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
 
     function buildLine(board, pl, cfg, plan, cellAsset) {
         var L = cfg.layout, LS = cfg.lineStyle, i, k;
-        var lyr = newShapeLayer(board, "Line " + (pl.index + 1));
-        addGroup(lyr, "Line");
-        addPath(lyr, "Line", pl.points);
-        addStroke(lyr, "Line", pl.color, Math.max(1, LS.width));
-        addTrim(lyr, "Line");
-        if (LS.boxes && !cellAsset) {
+        var lyr = newShapeLayer(board, (pl.highlight ? "Highlight " : "Line ") + (pl.index + 1));
+        var hasPath = pl.points.length >= 2;
+        if (hasPath) {
+            addGroup(lyr, "Line");
+            addPath(lyr, "Line", pl.points);
+            addStroke(lyr, "Line", pl.color, Math.max(1, LS.width));
+            addTrim(lyr, "Line");
+        }
+        if ((LS.boxes || pl.highlight) && !cellAsset) {
             addGroup(lyr, "Boxes");
             for (i = 0; i < pl.cells.length; i++) {
                 addRect(lyr, "Boxes", [L.cellW - LS.boxWidth, L.cellH - LS.boxWidth],
@@ -1661,19 +1698,19 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         if (LS.glow) { addGlow(lyr); }
         lyr.label = 13;
 
-        var trimEnd = vecs(lyr, "Line").property("ADBE Vector Filter - Trim").property("ADBE Vector Trim End");
+        var trimEnd = hasPath ? vecs(lyr, "Line").property("ADBE Vector Filter - Trim").property("ADBE Vector Trim End") : null;
         var op = lyr.transform.opacity;
         for (k = 0; k < pl.shows.length; k++) {
             var sh = pl.shows[k];
             var draw = Math.min(Math.max(0, LS.drawTime), (sh.end - sh.start) / 2);
-            if (draw > 0) {
+            if (trimEnd && draw > 0) {
                 key(trimEnd, sh.start, 0);
                 key(trimEnd, sh.start + draw, 100, true);
             }
             key(op, sh.start, 100, true);
             key(op, sh.end, 0, true);
         }
-        if (!trimEnd.numKeys) { trimEnd.setValue(100); }
+        if (trimEnd && !trimEnd.numKeys) { trimEnd.setValue(100); }
         lyr.inPoint = pl.shows[0].start;
         lyr.outPoint = pl.shows[pl.shows.length - 1].end;
 
@@ -2517,8 +2554,10 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         });
         lineList.preferredSize = [356, 100];
         var le1 = row(tLines);
-        var etLinePattern = lineField(le1, "\u7DDA\u578B", "pattern", { chars: 12, tip: "\u6BCF\u8F2A\u7B2C\u5E7E\u5217\uFF081 = \u6700\u4E0A\u9762\uFF09\uFF0C\u4F8B\u5982 1,2,3,2,1" });
+        var etLinePattern = lineField(le1, "\u7DDA\u578B", "pattern", { chars: 12, tip: "\u6BCF\u8F2A\u7B2C\u5E7E\u5217\uFF081 = \u6700\u4E0A\u9762\uFF09\uFF0C\u4F8B\u5982 1,2,3,2,1\u3002\n0 = \u9019\u8F2A\u4E0D\u6846\uFF1A2,0,1,0,2 = \u53EA\u6846 3 \u9846 Scatter\u3001\u4E0D\u756B\u7DDA" });
         var etLineCount = lineField(le1, "\u9023", "count", { chars: 2, labelWidth: 20, integer: true });
+        var cbBoxOnly = le1.add("checkbox", undefined, "\u53EA\u6846");
+        cbBoxOnly.helpTip = "\u53EA\u6846\u683C\u5B50\u3001\u4E0D\u756B\u7DDA\uFF08Scatter \u9019\u985E\u4E0D\u9760\u9023\u7DDA\u7684\u4E2D\u734E\uFF09";
         var le2 = row(tLines);
         var etLineShows = lineField(le2, "\u986F\u793A", "shows", { chars: 22, tip: "\u505C\u59A5\u5F8C\u5E7E\u79D2\u958B\u59CB + \u986F\u793A\u5E7E\u79D2\uFF0C\u53EF\u4EE5\u591A\u6BB5\uFF1A0.3+1.2, 2.5+0.9" });
         var le3 = row(tLines);
@@ -2717,7 +2756,8 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 st.lineFields[i].ctrl.enabled = !!ln;
             }
             lineColorEt.text = ln ? ln.color : "";
-            lineColorEt.enabled = !!ln;
+            lineColorEt.enabled = cbBoxOnly.enabled = !!ln;
+            cbBoxOnly.value = !!(ln && ln.boxOnly);
         }
 
         function refreshLineList(keepSel) {
@@ -2726,7 +2766,8 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             for (var i = 0; i < st.cfg.lines.length; i++) {
                 var ln = st.cfg.lines[i];
                 var it = lineList.add("item", String(i + 1));
-                var cols = [ln.pattern, String(ln.count), ln.shows];
+                var hl = ln.boxOnly || /(^|[\s,])[0-]([\s,]|$)/.test(ln.pattern);
+                var cols = [ln.pattern, hl ? "\u6846" : String(ln.count), ln.shows];
                 for (var c = 0; c < cols.length; c++) {
                     try { it.subItems[c].text = cols[c]; } catch (e) {  }
                 }
@@ -3050,7 +3091,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             st.cfg.reels = S.generateReels(st.cfg);
             var kept = [];
             for (var i = 0; i < st.cfg.lines.length; i++) {
-                if (LN.parsePattern(st.cfg.lines[i].pattern, nr, ny)) { kept.push(st.cfg.lines[i]); }
+                if (LN.parsePattern(st.cfg.lines[i].pattern, nr, ny, true)) { kept.push(st.cfg.lines[i]); }
             }
             var dropped = st.cfg.lines.length - kept.length;
             st.cfg.lines = kept;
@@ -3255,8 +3296,9 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 var d = S.lineDefaults();
                 d.pattern = res.lines[i].pattern;
                 d.count = res.lines[i].count;
+                d.boxOnly = !!res.lines[i].boxOnly;
                 lines.push(d);
-                desc.push("\u7DDA " + res.lines[i].payline + "\uFF1A" + res.lines[i].symbol + "\u00D7" + res.lines[i].count);
+                desc.push((res.lines[i].scatter ? "" : "\u7DDA " + res.lines[i].payline + "\uFF1A") + res.lines[i].symbol + "\u00D7" + res.lines[i].count);
             }
             st.cfg.lines = LN.applyTiming(lines, st.cfg.lineGen);
             refreshLineList();
@@ -3288,6 +3330,14 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         };
 
         lineList.onChange = function () { syncLineEditor(); };
+
+        cbBoxOnly.onClick = function () {
+            var idx = selectedIndices(lineList);
+            for (var i = 0; i < idx.length; i++) { st.cfg.lines[idx[i]].boxOnly = this.value; }
+            refreshLineList(true);
+            persist();
+            updatePlan();
+        };
 
         btnLineTiming.onClick = function () {
             if (!st.cfg.lines.length) { setStatus("\u9084\u6C92\u6709\u9023\u7DDA"); return; }

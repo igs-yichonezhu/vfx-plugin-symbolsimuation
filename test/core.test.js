@@ -82,7 +82,7 @@ test("normalizeConfig 補齊欄位、修正型別、調整盤面、產生各輪�
   deq(c.startBoard, [["A", "A"], ["B", ""], ["", ""], ["", ""]]);
   assert.strictEqual(c.endBoard.length, 4);
   assert.strictEqual(c.reels.length, 4);
-  deq(c.lines, [{ pattern: "1,1,1,1", count: 4, shows: "0+1", color: "" }]);
+  deq(c.lines, [{ pattern: "1,1,1,1", count: 4, shows: "0+1", color: "", boxOnly: false }]);
   // 各輪表格長度正確時保留原值
   const c2 = SFS.normalizeConfig({ layout: { reels: 2 }, reels: [{ stop: 3, speed: 9 }, { stop: 4, decelCurve: "soft" }] });
   assert.strictEqual(c2.reels[0].stop, 3);
@@ -341,6 +341,19 @@ test("連線：線型 / 顯示時間解析", () => {
   assert.strictEqual(SFS.lines.formatShows([{ start: 0.3, dur: 1.2 }, { start: 2.5, dur: 0.9 }]), "0.3+1.2, 2.5+0.9");
 });
 
+test("連線：Scatter 格子框（線型含 0）", () => {
+  deq(SFS.lines.parsePattern("2,0,1,-,3", 5, 3, true), [1, -1, 0, -1, 2]);
+  assert.strictEqual(SFS.lines.parsePattern("2,0,1,0,3", 5, 3), null, "gaps need allowGaps");
+  assert.strictEqual(SFS.lines.parsePattern("0,0,0,0,0", 5, 3, true), null, "at least one cell");
+  const cfg = sampleConfig(SFS);
+  cfg.lines = [{ pattern: "2,0,1,0,2", count: 9, shows: "0.2+1.5", color: "" }];
+  deq(SFS.validateConfig(cfg), [], "count ignored for highlights");
+  const plan = SFS.computePlan(cfg, 30);
+  deq(plan.lines[0].cells, [[0, 1], [2, 0], [4, 1]]);
+  deq(plan.lines[0].points, []);
+  assert.ok(plan.lines[0].highlight);
+});
+
 test("連線：內建線型（5x3 = 20 條，其他尺寸都合法）", () => {
   const std = SFS.lines.defaultPaylines(5, 3);
   assert.strictEqual(std.length, 20);
@@ -367,13 +380,24 @@ test("連線偵測：百搭代替、不算連線的符號、最少連線數、�
   // 中間 7 連 4（第 4 輪是 WILD）、上排 K 連 3（第 2 輪 WILD）；下排 SCATTER 不算
   assert.ok(got.indexOf("2,2,2,2,2:SEVENx4") >= 0, got.join(" "));
   assert.ok(got.indexOf("1,1,1,1,1:Kx3") >= 0, got.join(" "));
-  assert.ok(!got.some((g) => /SCATTER/.test(g)), got.join(" "));
+  // SCATTER 不算連線，但數到觸發數會另外框起來（線型裡 0 = 這輪不框）
+  assert.ok(!res.lines.some((l) => l.symbol === "SCATTER" && !l.boxOnly), got.join(" "));
+  const sc = res.lines.find((l) => l.scatter);
+  assert.ok(sc && sc.pattern === "3,3,3,3,3" && sc.count === 5 && sc.boxOnly, JSON.stringify(sc));
+  // 沒有 0 的框格子也不能畫成線
+  const c2 = sampleConfig(SFS);
+  c2.lines = [{ pattern: sc.pattern, count: 5, shows: "0+1", color: "", boxOnly: true }];
+  const p2 = SFS.computePlan(c2, 30);
+  assert.ok(p2.lines[0].highlight && !p2.lines[0].points.length);
   cfg.lineSet.exclude = "";
   assert.ok(SFS.lines.detect(cfg).lines.some((l) => l.pattern === "3,3,3,3,3" && l.count === 5));
   cfg.lineSet.exclude = "SCATTER";
   cfg.lineSet.minCount = 4;
   res = SFS.lines.detect(cfg);
   assert.ok(res.lines.every((l) => l.count >= 4));
+  cfg.antRule.count = 6;
+  assert.ok(!SFS.lines.detect(cfg).lines.some((l) => l.scatter), "not enough scatters");
+  cfg.antRule.count = 3;
   cfg.lineSet.paylines = "2 2 2 2 2\n1 2 9 2 1";
   res = SFS.lines.detect(cfg);
   assert.strictEqual(res.errors.length, 1);

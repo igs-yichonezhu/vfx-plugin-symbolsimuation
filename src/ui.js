@@ -606,8 +606,10 @@
         });
         lineList.preferredSize = [356, 100];
         var le1 = row(tLines);
-        var etLinePattern = lineField(le1, "線型", "pattern", { chars: 12, tip: "每輪第幾列（1 = 最上面），例如 1,2,3,2,1" });
+        var etLinePattern = lineField(le1, "線型", "pattern", { chars: 12, tip: "每輪第幾列（1 = 最上面），例如 1,2,3,2,1。\n0 = 這輪不框：2,0,1,0,2 = 只框 3 顆 Scatter、不畫線" });
         var etLineCount = lineField(le1, "連", "count", { chars: 2, labelWidth: 20, integer: true });
+        var cbBoxOnly = le1.add("checkbox", undefined, "只框");
+        cbBoxOnly.helpTip = "只框格子、不畫線（Scatter 這類不靠連線的中獎）";
         var le2 = row(tLines);
         var etLineShows = lineField(le2, "顯示", "shows", { chars: 22, tip: "停妥後幾秒開始 + 顯示幾秒，可以多段：0.3+1.2, 2.5+0.9" });
         var le3 = row(tLines);
@@ -811,7 +813,8 @@
                 st.lineFields[i].ctrl.enabled = !!ln;
             }
             lineColorEt.text = ln ? ln.color : "";
-            lineColorEt.enabled = !!ln;
+            lineColorEt.enabled = cbBoxOnly.enabled = !!ln;
+            cbBoxOnly.value = !!(ln && ln.boxOnly);
         }
 
         function refreshLineList(keepSel) {
@@ -820,7 +823,8 @@
             for (var i = 0; i < st.cfg.lines.length; i++) {
                 var ln = st.cfg.lines[i];
                 var it = lineList.add("item", String(i + 1));
-                var cols = [ln.pattern, String(ln.count), ln.shows];
+                var hl = ln.boxOnly || /(^|[\s,])[0-]([\s,]|$)/.test(ln.pattern);
+                var cols = [ln.pattern, hl ? "框" : String(ln.count), ln.shows];
                 for (var c = 0; c < cols.length; c++) {
                     try { it.subItems[c].text = cols[c]; } catch (e) { /* 單欄 listbox */ }
                 }
@@ -1147,7 +1151,7 @@
             st.cfg.reels = S.generateReels(st.cfg);
             var kept = [];
             for (var i = 0; i < st.cfg.lines.length; i++) {
-                if (LN.parsePattern(st.cfg.lines[i].pattern, nr, ny)) { kept.push(st.cfg.lines[i]); }
+                if (LN.parsePattern(st.cfg.lines[i].pattern, nr, ny, true)) { kept.push(st.cfg.lines[i]); }
             }
             var dropped = st.cfg.lines.length - kept.length;
             st.cfg.lines = kept;
@@ -1355,8 +1359,9 @@
                 var d = S.lineDefaults();
                 d.pattern = res.lines[i].pattern;
                 d.count = res.lines[i].count;
+                d.boxOnly = !!res.lines[i].boxOnly;
                 lines.push(d);
-                desc.push("線 " + res.lines[i].payline + "：" + res.lines[i].symbol + "×" + res.lines[i].count);
+                desc.push((res.lines[i].scatter ? "" : "線 " + res.lines[i].payline + "：") + res.lines[i].symbol + "×" + res.lines[i].count);
             }
             st.cfg.lines = LN.applyTiming(lines, st.cfg.lineGen);
             refreshLineList();
@@ -1388,6 +1393,14 @@
         };
 
         lineList.onChange = function () { syncLineEditor(); };
+
+        cbBoxOnly.onClick = function () {
+            var idx = selectedIndices(lineList);
+            for (var i = 0; i < idx.length; i++) { st.cfg.lines[idx[i]].boxOnly = this.value; }
+            refreshLineList(true);
+            persist();
+            updatePlan();
+        };
 
         btnLineTiming.onClick = function () {
             if (!st.cfg.lines.length) { setStatus("還沒有連線"); return; }
