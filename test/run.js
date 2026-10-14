@@ -4,11 +4,13 @@
  *  core.test.js  純邏輯（節奏、減速曲線、連線、驗證）
  *  ae.test.js    在模擬 AE 中建置，用 Bezier 內插驗證畫面上的符號、繞框、連線
  *  ui.test.js    整包 dist 載入模擬 AE + ScriptUI，操作面板跑完整流程
+ *  cli.test.js   agent 用的命令列（tools/sfs.js）與 AE 自動化入口（SlotFakeSpin_apply.jsx）
  */
 "use strict";
 const H = require("./helpers");
 require("./core.test");
 require("./ae.test");
 require("./ui.test");
+require("./cli.test");
 console.log("\n" + H.results.passed + " passed, " + H.results.failed + " failed");
 process.exit(H.results.failed ? 1 : 0);

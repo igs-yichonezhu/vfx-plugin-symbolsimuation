@@ -517,6 +517,16 @@
         var ra3 = row(pAnt);
         numField(ra3, "期待減速", "spin", "antDecelTime", "秒", { min: 0, after: regen });
         dropField(ra3, "", "spin", "antCurve", S.CURVE_KEYS, S.CURVE_LABELS, { after: regen });
+        var pSug = section(tRhythm, "期待感建議（依結果盤面自動判斷期待輪）");
+        var rs1 = row(pSug);
+        textField(rs1, "觸發符號", "antRule", "symbols", { chars: 9, tip: "Scatter / Bonus 等觸發型符號，逗號分隔" });
+        numField(rs1, "", "antRule", "count", "顆觸發", { min: 2, integer: true, chars: 2 });
+        checkField(rs1, "達標後續追", "antRule", "after", { tip: "已經觸發後，後面的輪還是期待（追第 4、5 顆）" });
+        var rs2 = row(pSug);
+        textField(rs2, "聽牌符號", "antRule", "tease", { chars: 9, tip: "大獎符號（例如 SEVEN）：同一條線從第 1 輪連到第 N 輪時，下一輪期待。空白 = 不判斷" });
+        numField(rs2, "連", "antRule", "teaseMin", "輪後", { min: 1, integer: true, chars: 2, labelWidth: 20 });
+        var btnSuggest = rs2.add("button", undefined, "期待感建議");
+        btnSuggest.helpTip = "依「結果盤面」和「停輪順序」模擬玩家看到的過程，算出哪幾輪要期待，並重新產生各輪";
         var rr8 = row(tRhythm);
         var cbAuto = checkField(rr8, "自動套用到各輪", "spin", "autoRhythm", {
             after: regen, tip: "勾選時，改上面的參數會立刻重新產生「各輪」表格。手動改過各輪後會自動取消勾選。"
@@ -1234,6 +1244,16 @@
             persist();
             updatePlan();
             setStatus("已依快速節奏重新產生各輪");
+        };
+
+        btnSuggest.onClick = function () {
+            var res = S.anticipation.apply(st.cfg);
+            syncFields();
+            refreshReelList();
+            persist();
+            updatePlan();
+            setStatus(res.reels.length ? "期待輪：" + res.reels.join(", ") + "（已重新產生各輪）" : "這個結果盤面沒有需要期待的輪");
+            alert(res.reasons.join("\n") || "沒有需要期待的輪", S.NAME);
         };
 
         reelList.onChange = function () { syncReelEditor(); };

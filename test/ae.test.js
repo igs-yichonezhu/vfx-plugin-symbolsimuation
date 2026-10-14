@@ -253,17 +253,24 @@ test("連線：路徑、畫線 Trim、顯示 / 隱藏、中獎框、符號跳動
   // 顏色
   const st = vectors(line1, "Line").find((c) => c.matchName === "ADBE Vector Graphic - Stroke");
   deq(leaf(st, "ADBE Vector Stroke Color").value, [0, 1, 0, 1]);
-  // 符號跳動：第 1 輪中間（連線 1 的格子）在連線 1 每次出現時放大
-  const rc1 = byName(board, "Reel 1").source;
-  const e2 = rc1._layers.find((l) => /_E02_/.test(l.name));
-  const base = 200 / 256 * 100;
-  const sc = e2.transform.scale;
+  // 符號跳動：盤面合成裡每個中獎格一份符號（不會被轉輪合成裁切），每次出現時放大
+  const wins = board._layers.filter((l) => /^Win R/.test(l.name));
+  assert.strictEqual(wins.length, 3 + 4 - 1, "cells shared by both lines appear once");
+  const w = byName(board, "Win R1-2_" + cfg.endBoard[0][1]);
+  assert.ok(w, wins.map((l) => l.name).join(","));
+  deq(w.transform.position.value, env.S.cellCenter(L, 0, 1));
+  assert.ok(w.index < byName(board, "Reel 1").index && w.index > line1.index, "above reels, below lines");
+  const base = 200 / 256 * 100, sc = w.transform.scale;
   near(sc.valueAtTime(s1.start)[0], base, 1e-6);
   near(sc.valueAtTime(s1.start + 0.1)[0], base * 1.2, 1e-6);
   near(sc.valueAtTime(s1.start + 0.4)[0], base, 1e-6);
   near(sc.valueAtTime(s2.start + 0.1)[0], base * 1.2, 1e-6);
-  // 沒中獎的格子不跳（第 1 輪第 3 列不在任何連線上）
-  assert.strictEqual(rc1._layers.find((l) => /_E03_/.test(l.name)).transform.scale.numKeys, 0);
+  near(w.transform.opacity.valueAtTime(s1.start + 0.5), 100);
+  near(w.transform.opacity.valueAtTime(s1.end + 0.1), 0);
+  near(w.transform.opacity.valueAtTime(s2.start + 0.1), 100);
+  // 轉輪合成裡的符號不再加關鍵影格
+  const rc1 = byName(board, "Reel 1").source;
+  assert.ok(rc1._layers.every((l) => l.transform.scale.numKeys === 0));
   // 停妥前不會出現
   assert.ok(s1.start >= out.plan.allSettled);
   const marks = out.boardLayer.property("ADBE Marker").keys.map((k) => k.v.comment);

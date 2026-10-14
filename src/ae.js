@@ -279,7 +279,6 @@
         return idx;
     }
 
-    // 回傳結果盤面符號圖層 [列] -> layer（給中獎跳動用）
     function buildReel(rc, rp, cfg, map, folder) {
         var L = cfg.layout, P = cfg.spin;
         var mb = !!P.motionBlur;
@@ -302,7 +301,7 @@
         ctrl.transform.position.dimensionsSeparated = true;
         setKeys(ctrl.transform.property("ADBE Position_1"), rp.keys);
 
-        var hasShy = false, endLayers = [];
+        var hasShy = false;
         for (var k = 0; k < rp.strip.length; k++) {
             var s = rp.strip[k];
             var item = map[s.name];
@@ -314,13 +313,12 @@
             lyr.transform.scale.setValue([sc, sc]);
             lyr.motionBlur = mb;
             if (s.kind === "start") { lyr.label = 9; }
-            else if (s.kind === "end") { lyr.label = 1; endLayers[s.n - 1] = { layer: lyr, scale: sc }; }
+            else if (s.kind === "end") { lyr.label = 1; }
             else { lyr.shy = true; hasShy = true; }
             fitDuration(lyr, item, rc.duration);
         }
         ctrl.moveToBeginning();
         if (hasShy) { rc.hideShyLayers = true; }
-        return endLayers;
     }
 
     // 合成素材比需要的長度短時，開啟時間重映射循環播放
@@ -510,34 +508,56 @@
         return lyr;
     }
 
-    // 中獎符號跳動：每次該格所在的連線出現時放大再縮回
-    function addPulses(plan, endLayers, pulse) {
+    // 中獎符號跳動：在盤面合成放一份中獎符號（不會被轉輪合成裁切），連線出現時放大再縮回
+    function buildWinOverlays(board, plan, cfg, map) {
+        var L = cfg.layout, pulse = cfg.lineStyle.pulse;
         if (!(pulse > 100) || !plan.lines.length) { return; }
-        var times = {}, i, k, c;
+        var cells = {}, order = [], i, k, c;
         for (i = 0; i < plan.lines.length; i++) {
             var pl = plan.lines[i];
-            for (k = 0; k < pl.shows.length; k++) {
-                for (c = 0; c < pl.cells.length; c++) {
-                    var id = pl.cells[c][0] + "_" + pl.cells[c][1];
-                    (times[id] = times[id] || []).push(pl.shows[k].start);
-                }
+            for (c = 0; c < pl.cells.length; c++) {
+                var id = pl.cells[c][0] + "_" + pl.cells[c][1];
+                if (!cells[id]) { cells[id] = { reel: pl.cells[c][0], row: pl.cells[c][1], shows: [] }; order.push(id); }
+                for (k = 0; k < pl.shows.length; k++) { cells[id].shows.push(pl.shows[k]); }
             }
         }
         var up = 0.1, down = 0.22;
-        for (var id2 in times) {
-            if (!times.hasOwnProperty(id2)) { continue; }
-            var rc = id2.split("_");
-            var ent = endLayers[parseInt(rc[0], 10)] ? endLayers[parseInt(rc[0], 10)][parseInt(rc[1], 10)] : null;
-            if (!ent) { continue; }
-            var list = times[id2].sort(function (a, b) { return a - b; });
-            var prop = ent.layer.transform.scale, base = ent.scale, big = ent.scale * pulse / 100, lastEnd = -1;
-            for (k = 0; k < list.length; k++) {
-                if (list[k] < lastEnd) { continue; }
-                key(prop, list[k], [base, base]);
-                key(prop, list[k] + up, [big, big]);
-                key(prop, list[k] + up + down, [base, base]);
-                lastEnd = list[k] + up + down + 0.01;
+        for (i = 0; i < order.length; i++) {
+            var cell = cells[order[i]];
+            var item = map[cfg.endBoard[cell.reel][cell.row]];
+            // 合併重疊的顯示區間
+            cell.shows.sort(function (a, b) { return a.start - b.start; });
+            var spans = [];
+            for (k = 0; k < cell.shows.length; k++) {
+                var sh = cell.shows[k], last = spans[spans.length - 1];
+                if (last && sh.start <= last.end + 1e-6) {
+                    if (sh.end > last.end) { last.end = sh.end; }
+                    last.starts.push(sh.start);
+                } else {
+                    spans.push({ start: sh.start, end: sh.end, starts: [sh.start] });
+                }
             }
+            var lyr = board.layers.add(item);
+            lyr.name = "Win R" + (cell.reel + 1) + "-" + (cell.row + 1) + "_" + cfg.endBoard[cell.reel][cell.row];
+            lyr.transform.position.setValue(S.cellCenter(L, cell.reel, cell.row));
+            var base = symbolScale(item, L), big = base * pulse / 100;
+            fitDuration(lyr, item, spans[spans.length - 1].end);
+            lyr.inPoint = spans[0].start;
+            lyr.outPoint = spans[spans.length - 1].end;
+            var op = lyr.transform.opacity, sc = lyr.transform.scale, lastEnd = -1;
+            for (k = 0; k < spans.length; k++) {
+                key(op, spans[k].start, 100, true);
+                key(op, spans[k].end, 0, true);
+                for (var p = 0; p < spans[k].starts.length; p++) {
+                    var t = spans[k].starts[p];
+                    if (t < lastEnd) { continue; }
+                    key(sc, t, [base, base]);
+                    key(sc, t + up, [big, big]);
+                    key(sc, t + up + down, [base, base]);
+                    lastEnd = t + up + down + 0.01;
+                }
+            }
+            lyr.label = 13;
         }
     }
 
@@ -549,7 +569,47 @@
         return it;
     }
 
-    // options: { boardLayer: 既有盤面圖層（更新模式） }
+    // 把合成的某幾個時間點輸出成 PNG（給 agent 檢查畫面用）。saveFrameToPng 是 AE 未公開但長期存在的 API。
+    A.exportFrames = function (comp, shots, folder) {
+        var out = [];
+        if (!comp.saveFrameToPng) { return { files: out, error: "這個版本的 AE 沒有 saveFrameToPng" }; }
+        if (!folder.exists) { folder.create(); }
+        for (var i = 0; i < shots.length; i++) {
+            var f = new File(folder.fsName + "/" + U.pad(i + 1, 2) + "_" + String(shots[i].label).replace(/[^\w\-]+/g, "_") + ".png");
+            try {
+                comp.saveFrameToPng(shots[i].t, f);
+                out.push({ t: shots[i].t, label: shots[i].label, file: f.fsName });
+            } catch (e) {
+                out.push({ t: shots[i].t, label: shots[i].label, file: "", error: e.toString() });
+            }
+        }
+        return { files: out, error: "" };
+    };
+
+    A.findComp = function (name) {
+        var found = null;
+        A.eachItem(function (it) {
+            if (it instanceof CompItem && it.name === name) { found = it; return false; }
+        });
+        return found;
+    };
+
+    // 在合成中找盤面圖層：先找選取的，再找指定盤面合成名稱的，最後找唯一的一個
+    A.findBoardLayer = function (comp, boardName) {
+        var i, lyr, all = [];
+        for (i = 1; i <= comp.numLayers; i++) {
+            lyr = comp.layer(i);
+            if (A.readBoardConfig(lyr)) { all.push(lyr); }
+        }
+        for (i = 0; i < all.length; i++) { if (all[i].selected) { return all[i]; } }
+        if (boardName) {
+            for (i = 0; i < all.length; i++) { if (all[i].source.name === boardName) { return all[i]; } }
+            return null;
+        }
+        return all.length === 1 ? all[0] : null;
+    };
+
+    // options: { boardLayer: 既有盤面圖層（更新模式）, targetComp: 指定目標合成 }
     // 回傳 { errors:[], warnings:[], boardComp, boardLayer, target, plan }
     A.build = function (cfg, options) {
         options = options || {};
@@ -563,9 +623,10 @@
         var update = !!options.boardLayer;
         var boardLayer = update ? options.boardLayer : null;
         var boardComp = update ? boardLayer.source : null;
-        var target = update ? boardLayer.containingComp : (L.target === "new" ? null : A.activeComp());
+        var target = update ? boardLayer.containingComp :
+            (options.targetComp || (L.target === "new" ? null : A.activeComp()));
         var offset = update ? boardLayer.startTime : 0;
-        if (!update && L.target !== "new" && !target) {
+        if (!update && !options.targetComp && L.target !== "new" && !target) {
             result.errors.push("請先開啟一個合成（或在「設定」把輸出改成「新建合成」）");
             return result;
         }
@@ -640,20 +701,19 @@
             boardComp.motionBlur = !!cfg.spin.motionBlur;
 
             // 由最後一輪往前加，時間軸上 R1 會在最上面
-            var endLayers = [];
             for (i = plan.reels.length - 1; i >= 0; i--) {
                 var rp = plan.reels[i];
                 var rc = app.project.items.addComp(boardComp.name + "_R" + (rp.index + 1),
                     plan.reelW, plan.reelH, 1, duration, fps);
                 rc.parentFolder = folder;
-                endLayers[rp.index] = buildReel(rc, rp, cfg, map, folder);
+                buildReel(rc, rp, cfg, map, folder);
                 var rl = boardComp.layers.add(rc);
                 rl.name = "Reel " + (rp.index + 1);
                 rl.transform.position.setValue([rp.x, plan.margin + plan.reelH / 2]);
             }
             for (i = 0; i < plan.frames.length; i++) { buildFrame(boardComp, plan.frames[i], cfg, plan, frameAsset); }
+            buildWinOverlays(boardComp, plan, cfg, map);
             for (i = 0; i < plan.lines.length; i++) { buildLine(boardComp, plan.lines[i], cfg, plan, cellAsset); }
-            addPulses(plan, endLayers, cfg.lineStyle.pulse);
 
             if (!boardLayer) {
                 boardLayer = target.layers.add(boardComp);

@@ -6,7 +6,7 @@
 var SFS = SFS || {};
 
 (function (S) {
-    S.VERSION = "1.0.0";
+    S.VERSION = "1.1.0";
     S.NAME = "SlotFakeSpin";
     S.TAG = "SFS_BOARD";
 
@@ -306,6 +306,14 @@ var SFS = SFS || {};
                 motionBlur: true,
                 shutterAngle: 180
             },
+            // 期待感建議規則（S.anticipation.suggest 用）
+            antRule: {
+                symbols: "SCATTER",    // 觸發符號，可多個：SCATTER,BONUS
+                count: 3,              // 幾顆觸發
+                after: true,           // 已經達標後，後面的輪還要不要繼續期待（追更多顆）
+                tease: "",             // 大獎聽牌符號，例如 SEVEN：同一條線連到第 N 輪時，下一輪期待
+                teaseMin: 2            // 連幾輪後開始聽牌
+            },
             // 各輪節奏（秒，從開始時間算起）；由「套用節奏」產生，可逐輪微調
             reels: [],
             // 繞框
@@ -410,7 +418,7 @@ var SFS = SFS || {};
                 });
             }
         }
-        var groups = ["layout", "spin", "frame", "lineSet", "lineGen", "lineStyle"];
+        var groups = ["layout", "spin", "antRule", "frame", "lineSet", "lineGen", "lineStyle"];
         for (var g = 0; g < groups.length; g++) {
             out[groups[g]] = copyTyped(def[groups[g]], cfg[groups[g]]);
         }
@@ -829,6 +837,94 @@ var SFS = SFS || {};
     };
 
     // ------------------------------------------------------------------
+    // 期待感建議
+    //
+    // 依「實際停輪順序」模擬玩家看到的過程：
+    //  1. 觸發型（Scatter / Bonus）：已停的輪累積到「觸發數 - 1」顆時，之後停的輪都要期待；
+    //     達標後是否繼續期待（追第 4、5 顆）由 after 決定。
+    //  2. 聽牌型（大獎連線）：某條線從第 1 輪起已連到 teaseMin 輪以上（百搭可代替），
+    //     下一輪就期待；連線一路延伸就一路期待到斷掉的那一輪為止。
+    //     只有在前面的輪都比這一輪先停時才成立（玩家看得到才有期待）。
+    // 回傳 { reels: [1 起算輪號], reasons: [說明], byReel: {輪號: 說明} }
+    // ------------------------------------------------------------------
+    var AN = S.anticipation = {};
+
+    AN.suggest = function (cfg) {
+        var L = cfg.layout, R = cfg.antRule, b = cfg.endBoard, i, r, k;
+        var steps = S.parseOrder(cfg.spin.stopOrder, L.reels);
+        var stepOf = [];
+        for (k = 0; k < steps.length; k++) {
+            for (i = 0; i < steps[k].length; i++) { stepOf[steps[k][i]] = k; }
+        }
+        var byReel = {}, reasons = [];
+        function mark(reel, why) {
+            if (!byReel[reel + 1]) { byReel[reel + 1] = why; }
+        }
+
+        // 1. 觸發型
+        var trig = S.parseNames(R.symbols), need = Math.round(R.count);
+        if (trig.length && need > 1) {
+            var landed = 0;
+            for (k = 0; k < steps.length; k++) {
+                if (landed >= need - 1 && (landed < need || R.after)) {
+                    for (i = 0; i < steps[k].length; i++) {
+                        mark(steps[k][i], "已停的輪有 " + landed + " 顆 " + trig.join("/") +
+                            (landed < need ? "（差 1 顆觸發）" : "（已觸發，追更多顆）"));
+                    }
+                }
+                for (i = 0; i < steps[k].length; i++) {
+                    r = steps[k][i];
+                    for (var y = 0; y < L.rows; y++) {
+                        if (U.indexOf(trig, b[r][y]) >= 0) { landed++; }
+                    }
+                }
+            }
+            reasons.push(trig.join("/") + " 共 " + landed + " 顆（" + need + " 顆觸發）" +
+                (landed >= need ? "：觸發" : "：未觸發"));
+        }
+
+        // 2. 聽牌型
+        var tease = S.parseNames(R.tease), teaseMin = Math.max(1, Math.round(R.teaseMin));
+        if (tease.length) {
+            var wilds = S.parseNames(cfg.lineSet.wilds);
+            var pl = LN.paylines(cfg).lines;
+            for (var li = 0; li < pl.length; li++) {
+                var line = pl[li], target = null, run = 0;
+                for (r = 0; r < L.reels; r++) {
+                    var sym = b[r][line[r] - 1];
+                    if (U.indexOf(wilds, sym) >= 0) { run++; continue; }
+                    if (target === null) { target = sym; }
+                    if (sym === target) { run++; } else { break; }
+                }
+                if (target === null || U.indexOf(tease, target) < 0 || run < teaseMin) { continue; }
+                // 第 teaseMin+1 輪 ~ 斷掉的那一輪都期待
+                for (r = teaseMin; r <= Math.min(run, L.reels - 1); r++) {
+                    var visible = true;
+                    for (var p = 0; p < r; p++) { if (stepOf[p] >= stepOf[r]) { visible = false; } }
+                    if (visible) { mark(r, "線 " + (li + 1) + " 的 " + target + " 已連 " + r + " 輪（聽牌）"); }
+                }
+            }
+        }
+
+        var list = [];
+        for (r = 1; r <= L.reels; r++) {
+            if (byReel[r]) {
+                list.push(r);
+                reasons.push("第 " + r + " 輪期待：" + byReel[r]);
+            }
+        }
+        return { reels: list, reasons: reasons, byReel: byReel };
+    };
+
+    // 套用建議：寫入 antReels 並重新產生各輪
+    AN.apply = function (cfg) {
+        var res = AN.suggest(cfg);
+        cfg.spin.antReels = res.reels.join(",");
+        cfg.reels = S.generateReels(cfg);
+        return res;
+    };
+
+    // ------------------------------------------------------------------
     // 設定驗證
     // ------------------------------------------------------------------
     S.validateConfig = function (cfg) {
@@ -1095,6 +1191,31 @@ var SFS = SFS || {};
         }
         plan.markers = mergeMarkers(plan.markers);
         return plan;
+    };
+
+    // 依 AE 的時間 Bezier 規則計算關鍵影格在時間 t 的值（給預覽 / 檢查用，和 AE 結果一致）
+    S.evalKeys = function (keys, t) {
+        var n = keys.length;
+        if (!n) { return 0; }
+        if (t <= keys[0].t) { return keys[0].y; }
+        if (t >= keys[n - 1].t) { return keys[n - 1].y; }
+        var j = 0;
+        while (keys[j + 1].t < t) { j++; }
+        var a = keys[j], b = keys[j + 1], dt = b.t - a.t;
+        var i1 = a.outInf / 100, i2 = b.inInf / 100;
+        if (i1 + i2 > 1) { var sum = i1 + i2; i1 /= sum; i2 /= sum; }
+        var x1 = a.t + i1 * dt, x2 = b.t - i2 * dt;
+        var y1 = a.y + a.outSpeed * i1 * dt, y2 = b.y - b.inSpeed * i2 * dt;
+        function bez(p0, p1, p2, p3, u) {
+            var m = 1 - u;
+            return m * m * m * p0 + 3 * m * m * u * p1 + 3 * m * u * u * p2 + u * u * u * p3;
+        }
+        var lo = 0, hi = 1;
+        for (var it = 0; it < 50; it++) {
+            var mid = (lo + hi) / 2;
+            if (bez(a.t, x1, x2, b.t, mid) < t) { lo = mid; } else { hi = mid; }
+        }
+        return bez(a.y, y1, y2, b.y, (lo + hi) / 2);
     };
 
     // AE 同一時間只能有一個標記：排序後把同一格的標記合併成「A / B」

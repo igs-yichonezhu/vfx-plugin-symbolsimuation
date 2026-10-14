@@ -34,6 +34,7 @@ function install(globalObj, opts) {
   class File {
     constructor(p) { this.fsName = path.resolve(String(p)); this.encoding = "BINARY"; this._mode = null; this._buf = ""; }
     get name() { return encodeURI(path.basename(this.fsName)); }
+    get parent() { return new Folder(path.dirname(this.fsName)); }
     get exists() { return fs.existsSync(this.fsName) && fs.statSync(this.fsName).isFile(); }
     open(mode) { this._mode = mode; this._buf = mode === "r" ? fs.readFileSync(this.fsName, "utf8") : ""; return true; }
     read() { return this._buf; }
@@ -42,6 +43,7 @@ function install(globalObj, opts) {
   }
   class Folder {
     constructor(p) { this.fsName = path.resolve(String(p)); }
+    create() { fs.mkdirSync(this.fsName, { recursive: true }); return true; }
     get name() { return encodeURI(path.basename(this.fsName)); }
     get exists() { return fs.existsSync(this.fsName); }
     getFiles() {
@@ -324,6 +326,11 @@ function install(globalObj, opts) {
     layer(i) { const l = this._layers[i - 1]; if (!l) throw new Error("layer index out of range " + i); return l; }
     get selectedLayers() { return this._layers.filter((l) => l.selected); }
     openInViewer() { this.openedInViewer = true; }
+    saveFrameToPng(t, file) {
+      if (typeof t !== "number" || !isFinite(t)) throw new Error("saveFrameToPng: bad time");
+      fs.mkdirSync(path.dirname(file.fsName), { recursive: true });
+      fs.writeFileSync(file.fsName, "PNG@" + t);
+    }
   }
 
   class Layer {

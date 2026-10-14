@@ -142,6 +142,24 @@ test("節奏：快速節奏自動套用、各輪手動微調後停止自動、�
   drawAll(panel);
 });
 
+test("節奏：期待感建議按鈕依結果盤面設定期待輪", () => {
+  const { ctx, panel } = setup();
+  click(byText(panel, "radiobutton", "結果盤面"));
+  ctx.__onDialog = (d) => {
+    find(d, (el) => el.type === "edittext").text = "A K SCATTER A K\nSCATTER A K Q A\nK Q A K SCATTER";
+    click(find(d, (el) => el.type === "button" && el.text === "套用"));
+    return d.closed;
+  };
+  click(byText(panel, "button", "文字編輯…"));
+  ctx.__onDialog = null;
+  const tR = tab(panel, "節奏");
+  click(byText(tR, "button", "期待感建議"));
+  assert.strictEqual(fieldAfter(tR, "期待輪").text, "4,5");
+  assert.ok((ctx.__alerts || []).some((a) => /第 4 輪期待/.test(a)));
+  const reelList = find(tab(panel, "各輪"), (el) => el.type === "listbox");
+  assert.ok(/^從 /.test(reelList.items[3].subItems[6].text));
+});
+
 test("連線：偵測、新增、編輯、顯示時間、顏色", () => {
   const { ctx, panel } = setup();
   click(byText(panel, "radiobutton", "結果盤面"));

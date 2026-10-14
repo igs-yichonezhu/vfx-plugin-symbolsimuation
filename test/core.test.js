@@ -421,3 +421,54 @@ test("顏色轉換", () => {
   deq(SFS.hexToRgb("bad", [0, 0, 0]), [0, 0, 0]);
   assert.strictEqual(SFS.rgbToHex([1, 0.5, 0]), "#FF8000");
 });
+
+// ---------------- 期待感建議 ----------------
+test("期待感：Scatter 差一顆才期待、依停輪順序、達標後續追開關", () => {
+  const cfg = sampleConfig(SFS);
+  cfg.endBoard = [["A", "SCATTER", "K"], ["K", "A", "Q"], ["SCATTER", "K", "A"], ["A", "K", "A"], ["K", "SCATTER", "A"]];
+  let res = SFS.anticipation.suggest(cfg);
+  deq(res.reels, [4, 5]);
+  assert.ok(/差 1 顆/.test(res.byReel[4]));
+  // 反向停：R5 先停（1 顆）、R4、R3（第 2 顆）→ 之後的 R2、R1 期待
+  cfg.spin.stopOrder = "5,4,3,2,1";
+  deq(SFS.anticipation.suggest(cfg).reels, [1, 2]);
+  // 已觸發後：after = true 繼續期待，false 不期待
+  cfg.spin.stopOrder = "";
+  cfg.endBoard[1][0] = "SCATTER"; // 前 3 輪就有 3 顆
+  deq(SFS.anticipation.suggest(cfg).reels, [3, 4, 5]);
+  cfg.antRule.after = false;
+  deq(SFS.anticipation.suggest(cfg).reels, [3]);
+  // 4 顆觸發
+  cfg.antRule.after = true; cfg.antRule.count = 4;
+  deq(SFS.anticipation.suggest(cfg).reels, [4, 5]);
+});
+
+test("期待感：大獎聽牌（百搭代替、連到哪期待到哪、看不到前面的輪不算）", () => {
+  const cfg = sampleConfig(SFS);
+  cfg.antRule.symbols = "";
+  cfg.antRule.tease = "SEVEN";
+  cfg.endBoard = [["SEVEN", "A", "K"], ["WILD", "A", "K"], ["SEVEN", "K", "A"], ["A", "K", "A"], ["K", "A", "A"]];
+  let res = SFS.anticipation.suggest(cfg);
+  deq(res.reels, [3, 4]);
+  assert.ok(/聽牌/.test(res.byReel[3]));
+  cfg.antRule.teaseMin = 3;
+  deq(SFS.anticipation.suggest(cfg).reels, [4]);
+  cfg.antRule.teaseMin = 2;
+  cfg.antRule.tease = "K"; // 下排 K-K、線 7（3,3,2,3,3）K-K-K
+  deq(SFS.anticipation.suggest(cfg).reels, [3, 4]);
+  cfg.antRule.tease = "Q";
+  deq(SFS.anticipation.suggest(cfg).reels, []);
+  cfg.antRule.tease = "SEVEN";
+  cfg.spin.stopOrder = "3,1,2,4,5";
+  deq(SFS.anticipation.suggest(cfg).reels, [4], "reel 3 stops before 1-2 → no tease on 3");
+});
+
+test("期待感：apply 寫入期待輪並重新產生各輪", () => {
+  const cfg = sampleConfig(SFS);
+  cfg.endBoard = [["A", "SCATTER", "K"], ["K", "A", "Q"], ["SCATTER", "K", "A"], ["A", "K", "A"], ["K", "SCATTER", "A"]];
+  const res = SFS.anticipation.apply(cfg);
+  assert.strictEqual(cfg.spin.antReels, "4,5");
+  deq(cfg.reels.map((r) => r.frame), [false, false, false, true, true]);
+  assert.ok(res.reasons.length >= 3);
+  deq(SFS.computePlan(cfg, 30).errors, []);
+});
