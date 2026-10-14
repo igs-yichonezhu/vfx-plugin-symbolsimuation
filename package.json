@@ -1,0 +1,13 @@
+{
+  "name": "slot-fake-spin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "After Effects ScriptUI panel: slot machine fake spin (start board -> result board) builder",
+  "scripts": {
+    "build": "node tools/build.js",
+    "test": "node tools/build.js && node test/run.js"
+  },
+  "devDependencies": {
+    "acorn": "^8.11.0"
+  }
+}
