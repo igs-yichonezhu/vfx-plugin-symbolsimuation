@@ -229,9 +229,21 @@ var SFS = SFS || {};
         return arr[this.nextInt(arr.length)];
     };
 
+    S.CURVES = {
+        standard: { i1: 1 / 3, i2: 1 / 3, k: 0.5 },
+        soft: { i1: 0.25, i2: 0.6, k: 0.35 },
+        hard: { i1: 0.3, i2: 0.1, k: 0.7 }
+    };
+    S.CURVE_KEYS = ["standard", "soft", "hard"];
+    S.CURVE_LABELS = ["\u6A19\u6E96", "\u7DE9\u505C", "\u6025\u505C"];
+    S.LINE_MODES = ["all_each", "all", "each"];
+    S.LINE_MODE_LABELS = ["\u5148\u5168\u90E8\u518D\u9010\u689D", "\u5168\u90E8\u4E00\u8D77", "\u9010\u689D\u8F2A\u64AD"];
+    S.LINE_COLORS = ["#FFD23C", "#3CDCFF", "#FF5A8C", "#78FF5A", "#B48CFF",
+        "#FF9A3C", "#5AFFD2", "#FF3C3C", "#3C8CFF", "#F0F0F0"];
+
     S.defaultConfig = function () {
-        return {
-            version: 1,
+        var cfg = {
+            version: 2,
 
             symbols: [],
             layout: {
@@ -242,6 +254,7 @@ var SFS = SFS || {};
                 gapX: 10,
                 gapY: 0,
                 peek: 0,
+                margin: 60,
                 scaleMode: "fit",
                 symbolScale: 100,
                 target: "active",
@@ -249,33 +262,124 @@ var SFS = SFS || {};
             },
             spin: {
                 startTime: 0,
+
+                autoRhythm: true,
+                startOrder: "",
+                startStagger: 0,
+                stopOrder: "",
                 firstStop: 1.0,
                 stagger: 0.25,
-                delays: "",
-                speed: 18,
+                speeds: "18",
+                decelTime: 0.08,
+                decelCurve: "standard",
+                overshoot: 0.15,
+                bounceTime: 0.2,
+                antReels: "",
+                antTime: 0.8,
+                antSpeed: 0,
+                antDecelTime: 0.45,
+                antCurve: "soft",
+
                 windupDist: 0.25,
                 windupTime: 0.15,
                 accelTime: 0.15,
-                decelTime: 0.08,
-                overshoot: 0.15,
-                bounceTime: 0.2,
+                speedRamp: 0.2,
                 direction: "down",
                 seed: 1,
                 motionBlur: true,
                 shutterAngle: 180
             },
 
+            reels: [],
+
+            frame: {
+                source: "builtin",
+                itemId: 0, itemName: "", path: "",
+                color: "#FFC83C",
+                width: 8,
+                pad: 10,
+                laps: 1.2,
+                runner: 22,
+                glow: true,
+                fade: 0.1,
+                hold: 0.15
+            },
+
+            lines: [],
+            lineSet: {
+                paylines: "",
+                wilds: "WILD",
+                exclude: "SCATTER",
+                minCount: 3
+            },
+            lineGen: {
+                delay: 0.3,
+                mode: "all_each",
+                allTime: 1.2,
+                eachTime: 0.9,
+                gap: 0.1
+            },
+            lineStyle: {
+                width: 10,
+                drawTime: 0.25,
+                full: true,
+                boxes: true,
+                boxWidth: 6,
+                pulse: 115,
+                glow: true,
+                cellSource: "builtin",
+                cellItemId: 0, cellItemName: "", cellPath: ""
+            },
+
             startBoard: [],
             endBoard: []
         };
+        cfg.reels = S.generateReels(cfg);
+        return cfg;
     };
+
+    S.reelDefaults = function () {
+        return {
+            start: 0,
+            stop: 1,
+            speed: 18,
+            decelTime: 0.08,
+            decelCurve: "standard",
+            overshoot: 0.15,
+            bounceTime: 0.2,
+            frame: false,
+            frameStart: 0,
+            frameSpeed: 0
+        };
+    };
+
+    S.lineDefaults = function () {
+        return { pattern: "", count: 3, shows: "", color: "" };
+    };
+
+    function copyTyped(def, src) {
+        var out = U.clone(def);
+        if (!src || typeof src !== "object") { return out; }
+        for (var k in def) {
+            if (def.hasOwnProperty(k) && src.hasOwnProperty(k) && src[k] !== null && src[k] !== undefined) {
+                var dv = def[k], v = src[k];
+                if (typeof dv === "number") { out[k] = U.toNumber(v, dv); }
+                else if (typeof dv === "boolean") { out[k] = !!v; }
+                else { out[k] = String(v); }
+            }
+        }
+        return out;
+    }
+
+    function oneOf(v, list, fallback) {
+        return U.indexOf(list, v) >= 0 ? v : fallback;
+    }
 
     S.normalizeConfig = function (cfg) {
         var def = S.defaultConfig();
-        var out = U.clone(def), k, group;
-        if (!cfg || typeof cfg !== "object") { return out; }
+        var out = U.clone(def), k;
+        if (!cfg || typeof cfg !== "object") { cfg = {}; }
         if (U.isArray(cfg.symbols)) {
-            out.symbols = [];
             for (k = 0; k < cfg.symbols.length; k++) {
                 var e = cfg.symbols[k];
                 if (!e || !e.name) { continue; }
@@ -287,28 +391,115 @@ var SFS = SFS || {};
                 });
             }
         }
-        var groups = ["layout", "spin"];
+        var groups = ["layout", "spin", "frame", "lineSet", "lineGen", "lineStyle"];
         for (var g = 0; g < groups.length; g++) {
-            group = groups[g];
-            if (!cfg[group]) { continue; }
-            for (k in def[group]) {
-                if (def[group].hasOwnProperty(k) && cfg[group].hasOwnProperty(k)) {
-                    var dv = def[group][k], v = cfg[group][k];
-                    if (typeof dv === "number") { out[group][k] = U.toNumber(v, dv); }
-                    else if (typeof dv === "boolean") { out[group][k] = !!v; }
-                    else { out[group][k] = String(v); }
-                }
-            }
+            out[groups[g]] = copyTyped(def[groups[g]], cfg[groups[g]]);
         }
-        var L = out.layout;
+        var L = out.layout, P = out.spin;
         L.reels = Math.round(U.clamp(L.reels, 1, 20));
         L.rows = Math.round(U.clamp(L.rows, 1, 20));
 
-        var ints = ["cellW", "cellH", "gapX", "gapY", "peek"];
+        var ints = ["cellW", "cellH", "gapX", "gapY", "peek", "margin"];
         for (k = 0; k < ints.length; k++) { L[ints[k]] = Math.round(L[ints[k]]); }
+        P.direction = oneOf(P.direction, ["down", "up"], "down");
+        P.decelCurve = oneOf(P.decelCurve, S.CURVE_KEYS, "standard");
+        P.antCurve = oneOf(P.antCurve, S.CURVE_KEYS, "soft");
+        out.lineGen.mode = oneOf(out.lineGen.mode, S.LINE_MODES, "all_each");
+        out.frame.source = oneOf(out.frame.source, ["builtin", "custom"], "builtin");
+        out.lineStyle.cellSource = oneOf(out.lineStyle.cellSource, ["builtin", "custom"], "builtin");
+
         out.startBoard = S.board.resize(U.isArray(cfg.startBoard) ? cfg.startBoard : [], L.reels, L.rows, "");
         out.endBoard = S.board.resize(U.isArray(cfg.endBoard) ? cfg.endBoard : [], L.reels, L.rows, "");
+
+        if (U.isArray(cfg.reels) && cfg.reels.length === L.reels) {
+            out.reels = [];
+            for (k = 0; k < cfg.reels.length; k++) {
+                var r = copyTyped(S.reelDefaults(), cfg.reels[k]);
+                r.decelCurve = oneOf(r.decelCurve, S.CURVE_KEYS, "standard");
+                out.reels.push(r);
+            }
+        } else {
+            out.reels = S.generateReels(out);
+        }
+        if (U.isArray(cfg.lines)) {
+            for (k = 0; k < cfg.lines.length; k++) {
+                var ln = copyTyped(S.lineDefaults(), cfg.lines[k]);
+                ln.count = Math.round(ln.count);
+                out.lines.push(ln);
+            }
+        }
         return out;
+    };
+
+    S.parseNumbers = function (text) {
+        var out = [], parts = String(text || "").split(/[\s,\uFF0C;]+/);
+        for (var i = 0; i < parts.length; i++) {
+            if (parts[i] === "") { continue; }
+            var n = parseFloat(parts[i]);
+            if (!isNaN(n) && isFinite(n)) { out.push(n); }
+        }
+        return out;
+    };
+
+    S.parseOrder = function (text, n) {
+        var steps = [], used = {}, i, j;
+        var src = String(text || "").replace(/\uFF0B/g, "+").replace(/\s*\+\s*/g, "+");
+        var parts = U.trim(src) === "" ? [] : U.trim(src).split(/[\s,\uFF0C;>]+/);
+        for (i = 0; i < parts.length; i++) {
+            var nums = parts[i].split("+"), step = [];
+            for (j = 0; j < nums.length; j++) {
+                var k = parseInt(nums[j], 10) - 1;
+                if (!isNaN(k) && k >= 0 && k < n && !used[k]) { step.push(k); used[k] = true; }
+            }
+            if (step.length) { steps.push(step); }
+        }
+        for (i = 0; i < n; i++) { if (!used[i]) { steps.push([i]); } }
+        return steps;
+    };
+
+    function r3(v) { return Math.round(v * 1000) / 1000; }
+
+    S.generateReels = function (cfg) {
+        var L = cfg.layout, P = cfg.spin, n = L.reels, i, k;
+        var stopSteps = S.parseOrder(P.stopOrder, n);
+        var startSteps = S.parseOrder(P.startOrder, n);
+        var startOf = [];
+        for (k = 0; k < startSteps.length; k++) {
+            for (i = 0; i < startSteps[k].length; i++) { startOf[startSteps[k][i]] = k * P.startStagger; }
+        }
+        var speeds = S.parseNumbers(P.speeds);
+        if (!speeds.length) { speeds = [18]; }
+        var ant = {}, antList = S.parseNumbers(P.antReels);
+        for (i = 0; i < antList.length; i++) { ant[Math.round(antList[i]) - 1] = true; }
+
+        var reels = [];
+        for (i = 0; i < n; i++) { reels.push(null); }
+        var extra = 0, prevStop = -1;
+        for (k = 0; k < stopSteps.length; k++) {
+            var step = stopSteps[k], stepAnt = false;
+            for (i = 0; i < step.length; i++) { if (ant[step[i]]) { stepAnt = true; } }
+            if (stepAnt) { extra += P.antTime; }
+            var stop = P.firstStop + k * P.stagger + extra;
+            var speed = speeds[Math.min(k, speeds.length - 1)];
+            for (i = 0; i < step.length; i++) {
+                var r = step[i], isAnt = !!ant[r];
+                var rd = S.reelDefaults();
+                rd.start = r3(startOf[r] || 0);
+                rd.stop = r3(stop);
+                rd.speed = speed;
+                rd.decelTime = isAnt ? P.antDecelTime : P.decelTime;
+                rd.decelCurve = isAnt ? P.antCurve : P.decelCurve;
+                rd.overshoot = P.overshoot;
+                rd.bounceTime = P.bounceTime;
+                rd.frame = isAnt;
+
+                rd.frameStart = isAnt ? r3(prevStop >= 0 ? prevStop : rd.start + P.windupTime + P.accelTime) : 0;
+                rd.frameSpeed = isAnt ? P.antSpeed : 0;
+                reels[r] = rd;
+            }
+            prevStop = stop;
+        }
+        return reels;
     };
 
     S.symbolNames = function (cfg) {
@@ -439,33 +630,203 @@ var SFS = SFS || {};
         return errors;
     };
 
-    S.parseDelays = function (text, reels) {
-        var out = [], parts = U.trim(text || "") === "" ? [] : U.trim(text).split(/[\s,]+/);
-        for (var i = 0; i < reels; i++) {
-            out.push(i < parts.length ? Math.max(0, U.toNumber(parts[i], 0)) : 0);
+    var LN = S.lines = {};
+
+    LN.parsePattern = function (text, reels, rows) {
+        var nums = S.parseNumbers(text);
+        if (nums.length !== reels) { return null; }
+        var out = [];
+        for (var i = 0; i < nums.length; i++) {
+            var v = Math.round(nums[i]);
+            if (v !== nums[i] || v < 1 || v > rows) { return null; }
+            out.push(v - 1);
         }
         return out;
     };
 
+    LN.parseShows = function (text) {
+        var out = [], parts = U.trim(text || "") === "" ? [] : U.trim(text).split(/[,\uFF0C;]+/);
+        for (var i = 0; i < parts.length; i++) {
+            var p = U.trim(parts[i]);
+            if (p === "") { continue; }
+            var m = /^(-?[\d.]+)\s*\+\s*([\d.]+)$/.exec(p);
+            if (!m) { return null; }
+            var s = parseFloat(m[1]), d = parseFloat(m[2]);
+            if (isNaN(s) || isNaN(d) || d <= 0) { return null; }
+            out.push({ start: s, dur: d });
+        }
+        return out;
+    };
+
+    LN.formatShows = function (shows) {
+        var out = [];
+        for (var i = 0; i < shows.length; i++) { out.push(r3(shows[i].start) + "+" + r3(shows[i].dur)); }
+        return out.join(", ");
+    };
+
+    LN.defaultPaylines = function (reels, rows) {
+        var out = [], r, y;
+        if (reels === 5 && rows === 3) {
+            return [[2, 2, 2, 2, 2], [1, 1, 1, 1, 1], [3, 3, 3, 3, 3], [1, 2, 3, 2, 1], [3, 2, 1, 2, 3],
+                [1, 1, 2, 1, 1], [3, 3, 2, 3, 3], [2, 3, 3, 3, 2], [2, 1, 1, 1, 2], [2, 1, 2, 1, 2],
+                [2, 3, 2, 3, 2], [1, 2, 1, 2, 1], [3, 2, 3, 2, 3], [2, 2, 1, 2, 2], [2, 2, 3, 2, 2],
+                [1, 2, 2, 2, 1], [3, 2, 2, 2, 3], [1, 3, 1, 3, 1], [3, 1, 3, 1, 3], [1, 3, 3, 3, 1]];
+        }
+        var mid = Math.floor((rows - 1) / 2);
+        var order = [mid];
+        for (y = 0; y < rows; y++) { if (y !== mid) { order.push(y); } }
+        for (var i = 0; i < order.length; i++) {
+            var line = [];
+            for (r = 0; r < reels; r++) { line.push(order[i] + 1); }
+            out.push(line);
+        }
+        if (rows >= 2 && reels >= 3) {
+            var v = [], w = [];
+            for (r = 0; r < reels; r++) {
+                var depth = Math.min(r, reels - 1 - r, rows - 1);
+                v.push(depth + 1);
+                w.push(rows - depth);
+            }
+            out.push(v);
+            out.push(w);
+        }
+        return out;
+    };
+
+    LN.paylinesToText = function (lines) {
+        var out = [];
+        for (var i = 0; i < lines.length; i++) { out.push(lines[i].join(" ")); }
+        return out.join("\n");
+    };
+
+    LN.paylines = function (cfg) {
+        var L = cfg.layout, text = cfg.lineSet.paylines;
+        if (U.trim(text || "") === "") { return { lines: LN.defaultPaylines(L.reels, L.rows), errors: [] }; }
+        var rawLines = String(text).split(/\r\n|\r|\n/), out = [], errors = [];
+        for (var i = 0; i < rawLines.length; i++) {
+            if (U.trim(rawLines[i]) === "") { continue; }
+            var p = LN.parsePattern(rawLines[i], L.reels, L.rows);
+            if (!p) {
+                errors.push("\u7DDA\u578B\u8868\u7B2C " + (i + 1) + " \u884C\u8981\u6709 " + L.reels + " \u500B 1~" + L.rows + " \u7684\u6578\u5B57\uFF1A" + rawLines[i]);
+            } else {
+                var one = [];
+                for (var k = 0; k < p.length; k++) { one.push(p[k] + 1); }
+                out.push(one);
+            }
+        }
+        return { lines: out, errors: errors };
+    };
+
+    LN.detect = function (cfg) {
+        var L = cfg.layout, b = cfg.endBoard;
+        var pl = LN.paylines(cfg);
+        var wilds = S.parseNames(cfg.lineSet.wilds), exclude = S.parseNames(cfg.lineSet.exclude);
+        var minCount = Math.max(1, Math.round(cfg.lineSet.minCount));
+        var found = [];
+        for (var i = 0; i < pl.lines.length; i++) {
+            var line = pl.lines[i], seq = [], r;
+            for (r = 0; r < L.reels; r++) { seq.push(b[r][line[r] - 1]); }
+            var target = null;
+            for (r = 0; r < seq.length; r++) {
+                if (U.indexOf(wilds, seq[r]) < 0) { target = seq[r]; break; }
+            }
+            if (target === null) { target = seq[0]; }
+            if (!target || U.indexOf(exclude, target) >= 0) { continue; }
+            var count = 0;
+            for (r = 0; r < seq.length; r++) {
+                if (seq[r] === target || U.indexOf(wilds, seq[r]) >= 0) { count++; } else { break; }
+            }
+            if (count >= minCount) {
+                found.push({ pattern: line.join(","), count: count, symbol: target, payline: i + 1 });
+            }
+        }
+        return { lines: found, errors: pl.errors };
+    };
+
+    LN.applyTiming = function (lines, gen) {
+        var n = lines.length, i, t;
+        for (i = 0; i < n; i++) {
+            var shows = [];
+            if (gen.mode === "all" || gen.mode === "all_each") {
+                shows.push({ start: gen.delay, dur: gen.allTime });
+            }
+            if (gen.mode === "each" || gen.mode === "all_each") {
+                t = gen.delay + (gen.mode === "all_each" ? gen.allTime + gen.gap : 0);
+                shows.push({ start: t + i * (gen.eachTime + gen.gap), dur: gen.eachTime });
+            }
+            lines[i].shows = LN.formatShows(shows);
+        }
+        return lines;
+    };
+
+    S.parseNames = function (text) {
+        var out = [], parts = String(text || "").split(/[,\uFF0C;]+/);
+        for (var i = 0; i < parts.length; i++) {
+            var p = U.trim(parts[i]);
+            if (p !== "") { out.push(p); }
+        }
+        return out;
+    };
+
+    S.hexToRgb = function (hex, fallback) {
+        var m = /^#?([0-9a-fA-F]{6})$/.exec(U.trim(hex || ""));
+        if (!m) { return fallback || [1, 1, 1]; }
+        var n = parseInt(m[1], 16);
+        return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+    };
+
+    S.rgbToHex = function (rgb) {
+        var s = "#";
+        for (var i = 0; i < 3; i++) {
+            var h = Math.round(U.clamp(rgb[i], 0, 1) * 255).toString(16).toUpperCase();
+            s += h.length < 2 ? "0" + h : h;
+        }
+        return s;
+    };
+
+    S.lineColor = function (line, index) {
+        if (line.color && /^#?[0-9a-fA-F]{6}$/.test(U.trim(line.color))) { return S.hexToRgb(line.color); }
+        return S.hexToRgb(S.LINE_COLORS[index % S.LINE_COLORS.length]);
+    };
+
     S.validateConfig = function (cfg) {
-        var e = [], L = cfg.layout, P = cfg.spin;
+        var e = [], L = cfg.layout, P = cfg.spin, i;
         var names = S.symbolNames(cfg);
         if (!names.length) { e.push("\u7B26\u865F\u5EAB\u662F\u7A7A\u7684\uFF1A\u8ACB\u5148\u532F\u5165\u7B26\u865F\u5716\u6A94"); }
         if (L.cellW < 4 || L.cellH < 4) { e.push("\u683C\u5B50\u5BEC\u9AD8\u81F3\u5C11\u8981 4px"); }
-        if (L.gapX < 0 || L.gapY < 0 || L.peek < 0) { e.push("\u9593\u8DDD / \u9732\u51FA\u4E0D\u80FD\u662F\u8CA0\u6578"); }
+        if (L.gapX < 0 || L.gapY < 0 || L.peek < 0 || L.margin < 0) { e.push("\u9593\u8DDD / \u9732\u51FA / \u7559\u767D\u4E0D\u80FD\u662F\u8CA0\u6578"); }
         if (L.symbolScale <= 0) { e.push("\u7B26\u865F\u7E2E\u653E\u5FC5\u9808\u5927\u65BC 0"); }
-        if (P.speed <= 0) { e.push("\u8F49\u901F\u5FC5\u9808\u5927\u65BC 0"); }
-        if (P.firstStop <= 0) { e.push("\u7B2C\u4E00\u8F2A\u505C\u6B62\u6642\u9593\u5FC5\u9808\u5927\u65BC 0"); }
-        if (P.stagger < 0) { e.push("\u6BCF\u8F2A\u9593\u9694\u4E0D\u80FD\u662F\u8CA0\u6578"); }
         if (P.startTime < 0) { e.push("\u958B\u59CB\u6642\u9593\u4E0D\u80FD\u662F\u8CA0\u6578"); }
-        var nonNeg = ["windupDist", "windupTime", "accelTime", "decelTime", "overshoot", "bounceTime"];
-        for (var i = 0; i < nonNeg.length; i++) {
-            if (P[nonNeg[i]] < 0) { e.push("\u52D5\u614B\u53C3\u6578\u4E0D\u80FD\u662F\u8CA0\u6578\uFF1A" + nonNeg[i]); }
+        var nonNeg = ["windupDist", "windupTime", "accelTime", "speedRamp"];
+        for (i = 0; i < nonNeg.length; i++) {
+            if (P[nonNeg[i]] < 0) { e.push("\u624B\u611F\u53C3\u6578\u4E0D\u80FD\u662F\u8CA0\u6578\uFF1A" + nonNeg[i]); }
         }
-        if (P.direction !== "down" && P.direction !== "up") { e.push("\u65B9\u5411\u5FC5\u9808\u662F down \u6216 up"); }
-        var bw = L.reels * L.cellW + (L.reels - 1) * L.gapX;
-        var bh = S.reelHeight(L);
+        var bw = L.reels * L.cellW + (L.reels - 1) * L.gapX + 2 * L.margin;
+        var bh = S.reelHeight(L) + 2 * L.margin;
         if (bw > 30000 || bh > 30000) { e.push("\u76E4\u9762\u5C3A\u5BF8\u8D85\u904E AE \u4E0A\u9650 30000px"); }
+        if (!U.isArray(cfg.reels) || cfg.reels.length !== L.reels) {
+            e.push("\u5404\u8F2A\u7BC0\u594F\u8868\u8207\u8F2A\u6578\u4E0D\u7B26\uFF0C\u8ACB\u6309\u300C\u5957\u7528\u7BC0\u594F\u300D");
+        } else {
+            for (i = 0; i < cfg.reels.length; i++) {
+                var R = cfg.reels[i], tag = "\u7B2C " + (i + 1) + " \u8F2A\uFF1A";
+                if (R.speed <= 0) { e.push(tag + "\u8F49\u901F\u5FC5\u9808\u5927\u65BC 0"); }
+                if (R.start < 0) { e.push(tag + "\u8D77\u8F49\u6642\u9593\u4E0D\u80FD\u662F\u8CA0\u6578"); }
+                if (R.stop <= R.start) { e.push(tag + "\u505C\u8F2A\u6642\u9593\u5FC5\u9808\u665A\u65BC\u8D77\u8F49\u6642\u9593"); }
+                if (R.decelTime < 0 || R.overshoot < 0 || R.bounceTime < 0) { e.push(tag + "\u6E1B\u901F / \u885D\u904E / \u56DE\u5F48\u4E0D\u80FD\u662F\u8CA0\u6578"); }
+                if (R.frame && R.frameStart >= R.stop) { e.push(tag + "\u7E5E\u6846\u958B\u59CB\u6642\u9593\u5FC5\u9808\u65E9\u65BC\u505C\u8F2A\u6642\u9593"); }
+                if (R.frame && R.frameSpeed < 0) { e.push(tag + "\u7E5E\u6846\u8F49\u901F\u4E0D\u80FD\u662F\u8CA0\u6578"); }
+            }
+        }
+        for (i = 0; i < cfg.lines.length; i++) {
+            var ln = cfg.lines[i], lt = "\u9023\u7DDA " + (i + 1) + "\uFF1A";
+            if (!LN.parsePattern(ln.pattern, L.reels, L.rows)) {
+                e.push(lt + "\u7DDA\u578B\u8981\u6709 " + L.reels + " \u500B 1~" + L.rows + " \u7684\u6578\u5B57\uFF08\u6BCF\u8F2A\u7B2C\u5E7E\u5217\uFF09\uFF0C\u76EE\u524D\u662F\u300C" + ln.pattern + "\u300D");
+            }
+            if (ln.count < 1 || ln.count > L.reels) { e.push(lt + "\u9023\u7DDA\u6578\u8981\u5728 1~" + L.reels + " \u4E4B\u9593"); }
+            var shows = LN.parseShows(ln.shows);
+            if (!shows) { e.push(lt + "\u986F\u793A\u6642\u9593\u683C\u5F0F\u662F\u300C\u958B\u59CB+\u9577\u5EA6\u300D\uFF0C\u4F8B\u5982 0.3+1.2, 1.6+0.9"); }
+            else if (!shows.length) { e.push(lt + "\u6C92\u6709\u8A2D\u5B9A\u986F\u793A\u6642\u9593"); }
+        }
         if (names.length) {
             e = e.concat(B.validate(cfg.startBoard, L.reels, L.rows, names, "\u8D77\u59CB\u76E4\u9762"));
             e = e.concat(B.validate(cfg.endBoard, L.reels, L.rows, names, "\u7D50\u679C\u76E4\u9762"));
@@ -477,121 +838,218 @@ var SFS = SFS || {};
         return L.rows * (L.cellH + L.gapY) - L.gapY + 2 * L.peek;
     };
 
+    S.reelCenterX = function (L, r) {
+        return L.margin + r * (L.cellW + L.gapX) + L.cellW / 2;
+    };
+
+    S.cellCenter = function (L, r, row) {
+        return [S.reelCenterX(L, r), L.margin + L.peek + row * (L.cellH + L.gapY) + L.cellH / 2];
+    };
+
     S.INF_LINEAR = 100 / 3;
 
     S.computePlan = function (cfg, fps, opts) {
         opts = opts || {};
-        var L = cfg.layout, P = cfg.spin;
-        var errors = [];
-        if (!(fps > 0)) { return { errors: ["\u5F71\u683C\u901F\u7387\u932F\u8AA4"] }; }
-        var frame = 1 / fps;
+        var L = cfg.layout, P = cfg.spin, F = cfg.frame;
+        var errors = [], warnings = [];
+        if (!(fps > 0)) { return { errors: ["\u5F71\u683C\u901F\u7387\u932F\u8AA4"], warnings: [] }; }
+        var frame = 1 / fps, EPS = 1e-9;
         function snap(t) { return Math.round(t * fps) / fps; }
-        function atLeast(t, min) { return t < min - 1e-9 ? min : t; }
+        function atLeast(t, min) { return t < min - EPS ? min : t; }
 
         var rows = L.rows, reels = L.reels;
         var pitch = L.cellH + L.gapY;
         var reelH = S.reelHeight(L);
         var dir = P.direction === "up" ? -1 : 1;
         var timeOffset = opts.timeOffset || 0;
-
         var windup = (P.windupDist > 0 && P.windupTime > 0) ? P.windupDist * L.cellH : 0;
-        var overshoot = (P.overshoot > 0 && P.bounceTime > 0) ? P.overshoot * L.cellH : 0;
-        var buffer = Math.ceil((L.peek + Math.max(windup, overshoot) + L.gapY) / pitch) + 1;
-        var vTarget = P.speed * pitch;
         var minFill = Math.max(rows, 2);
-        var delays = S.parseDelays(P.delays, reels);
         var pool = opts.fillerPool || S.fillerPool(cfg);
         var rng = new S.Rng(P.seed);
+        var reelCfg = cfg.reels;
+        if (!U.isArray(reelCfg) || reelCfg.length !== reels) { reelCfg = S.generateReels(cfg); }
 
-        var tStart = snap(P.startTime - timeOffset);
+        var T0 = snap(P.startTime - timeOffset);
+        var reelsW = reels * L.cellW + (reels - 1) * L.gapX;
         var plan = {
             fps: fps,
             pitch: pitch,
             reelW: L.cellW,
             reelH: reelH,
-            boardW: reels * L.cellW + (reels - 1) * L.gapX,
-            boardH: reelH,
-            buffer: buffer,
+            margin: L.margin,
+            reelsW: reelsW,
+            boardW: reelsW + 2 * L.margin,
+            boardH: reelH + 2 * L.margin,
             direction: dir,
-            startTime: tStart,
+            startTime: T0,
             reels: [],
-            markers: [{ t: tStart, label: "SPIN" }],
-            endTime: tStart,
-            errors: errors
+            frames: [],
+            lines: [],
+            markers: [{ t: T0, label: "SPIN" }],
+            allSettled: T0,
+            endTime: T0,
+            errors: errors,
+            warnings: warnings
         };
 
-        var extra = 0;
         for (var i = 0; i < reels; i++) {
-            extra += delays[i];
-            var tStop = snap(tStart + P.firstStop + i * P.stagger + extra);
-            var t1 = windup > 0 ? atLeast(snap(tStart + P.windupTime), tStart + frame) : tStart;
+            var R = reelCfg[i], tag = "\u7B2C " + (i + 1) + " \u8F2A";
+            var overshoot = (R.overshoot > 0 && R.bounceTime > 0) ? R.overshoot * L.cellH : 0;
+            var buffer = Math.ceil((L.peek + Math.max(windup, overshoot) + L.gapY) / pitch) + 1;
+            var tS = snap(T0 + R.start);
+            var tStop = snap(T0 + R.stop);
+            var t1 = windup > 0 ? atLeast(snap(tS + P.windupTime), tS + frame) : tS;
             var t2 = atLeast(snap(t1 + P.accelTime), t1 + frame);
-            var t3 = snap(tStop - P.decelTime);
-            if (t3 > tStop - frame + 1e-9) { t3 = tStop - frame; }
-            var t5 = overshoot > 0 ? atLeast(snap(tStop + P.bounceTime), tStop + frame) : tStop;
-
-            if (t2 > t3 + 1e-9) {
-                errors.push("\u7B2C " + (i + 1) + " \u8F2A\u505C\u5F97\u592A\u65E9\uFF1A\u505C\u6B62\u6642\u9593\u81F3\u5C11\u8981\u5927\u65BC \u62C9\u56DE+\u52A0\u901F+\u6E1B\u901F \u7684\u6642\u9593\uFF08\u7D04 " +
-                    (Math.round((t2 - tStart + (tStop - t3)) * 100) / 100) + " \u79D2\uFF09");
+            var t3 = snap(tStop - R.decelTime);
+            if (t3 > tStop - frame + EPS) { t3 = tStop - frame; }
+            var t5 = overshoot > 0 ? atLeast(snap(tStop + R.bounceTime), tStop + frame) : tStop;
+            if (t2 > t3 + EPS) {
+                errors.push(tag + "\u505C\u5F97\u592A\u65E9\uFF1A\u5F9E\u8D77\u8F49\u5230\u505C\u8F2A\u81F3\u5C11\u8981 " +
+                    (Math.round((t2 - tS + (tStop - t3)) * 100) / 100) + " \u79D2\uFF08\u62C9\u56DE+\u52A0\u901F+\u6E1B\u901F\uFF09");
                 continue;
             }
 
-            var ta = t2 - t1, tc = t3 - t2, td = tStop - t3;
-            var denom = ta / 2 + tc + td / 2;
-            var fill = Math.round((vTarget * denom - windup - overshoot) / pitch - rows);
+            var v1 = Math.max(0.01, R.speed) * pitch, vLast = v1;
+            var segs = [{ a: t1, b: t2, va: 0, vb: v1, d: v1 * (t2 - t1) / 2 }];
+            var tA = -1, tB = -1;
+            if (R.frame && R.frameSpeed > 0) {
+                tA = snap(T0 + R.frameStart);
+                tB = atLeast(snap(tA + P.speedRamp), tA + frame);
+            }
+            if (tA >= 0 && tA >= t2 - EPS && tB <= t3 + EPS) {
+                var v2 = R.frameSpeed * pitch;
+                if (tA - t2 > EPS) { segs.push({ a: t2, b: tA, va: v1, vb: v1, d: v1 * (tA - t2) }); }
+                segs.push({ a: tA, b: tB, va: v1, vb: v2, d: (v1 + v2) / 2 * (tB - tA) });
+                if (t3 - tB > EPS) { segs.push({ a: tB, b: t3, va: v2, vb: v2, d: v2 * (t3 - tB) }); }
+                vLast = v2;
+            } else {
+                if (tA >= 0) { warnings.push(tag + "\uFF1A\u7E5E\u6846\u8F49\u901F\u7684\u5207\u63DB\u6642\u9593\u4E0D\u5728\u7B49\u901F\u5340\u6BB5\u5167\uFF0C\u5DF2\u5FFD\u7565"); }
+                if (t3 - t2 > EPS) { segs.push({ a: t2, b: t3, va: v1, vb: v1, d: v1 * (t3 - t2) }); }
+            }
+            var curve = S.CURVES[R.decelCurve] || S.CURVES.standard;
+            segs.push({ a: t3, b: tStop, va: vLast, vb: 0, d: curve.k * vLast * (tStop - t3), infA: curve.i1 * 100, infB: curve.i2 * 100 });
+
+            var nominal = 0, s;
+            for (s = 0; s < segs.length; s++) { nominal += segs[s].d; }
+            var fill = Math.round((nominal - windup - overshoot) / pitch - rows);
             if (fill < minFill) { fill = minFill; }
             var travel = windup + (rows + fill) * pitch + overshoot;
-            var v = travel / denom;
+            var scale = travel / nominal;
 
             var strip = buildStrip(cfg.startBoard[i], cfg.endBoard[i], rows, fill, buffer, dir, pool, rng);
-            var startIdx = strip.startIndex, endIdx = strip.endIndex;
-            var y0 = L.peek - startIdx * pitch;
-            var yEnd = L.peek - endIdx * pitch;
+            var y0 = L.peek - strip.startIndex * pitch;
+            var yEnd = L.peek - strip.endIndex * pitch;
 
-            var keys = [];
-            var y1 = y0 - dir * windup;
+            var keys = [], y = y0;
             if (windup > 0) {
-                keys.push(mkKey(tStart, y0, 0, S.INF_LINEAR, 0, 50));
-                keys.push(mkKey(t1, y1, 0, 50, 0, S.INF_LINEAR));
+                keys.push(mkKey(tS, y0, 0, S.INF_LINEAR, 0, 50));
+                y = y0 - dir * windup;
+                keys.push(mkKey(t1, y, 0, 50, 0, S.INF_LINEAR));
             } else {
-                keys.push(mkKey(tStart, y0, 0, S.INF_LINEAR, 0, S.INF_LINEAR));
+                keys.push(mkKey(tS, y0, 0, S.INF_LINEAR, 0, S.INF_LINEAR));
             }
-            var y2 = y1 + dir * v * ta / 2;
-            var y3 = y2 + dir * v * tc;
-            var yPeak = yEnd + dir * overshoot;
-            keys.push(mkKey(t2, y2, dir * v, S.INF_LINEAR, dir * v, S.INF_LINEAR));
-            if (tc > 1e-9) {
-                keys.push(mkKey(t3, y3, dir * v, S.INF_LINEAR, dir * v, S.INF_LINEAR));
+            for (s = 0; s < segs.length; s++) {
+                var sg = segs[s], last = keys[keys.length - 1];
+                last.outSpeed = dir * scale * sg.va;
+                last.outInf = sg.infA || S.INF_LINEAR;
+                y += dir * scale * sg.d;
+                keys.push(mkKey(sg.b, y, dir * scale * sg.vb, sg.infB || S.INF_LINEAR, dir * scale * sg.vb, S.INF_LINEAR));
             }
+            var stopKey = keys[keys.length - 1];
+            stopKey.y = yEnd + dir * overshoot;
             if (overshoot > 0) {
-                keys.push(mkKey(tStop, yPeak, 0, S.INF_LINEAR, 0, 40));
+                stopKey.outSpeed = 0;
+                stopKey.outInf = 40;
                 keys.push(mkKey(t5, yEnd, 0, 60, 0, S.INF_LINEAR));
-            } else {
-                keys.push(mkKey(tStop, yEnd, 0, S.INF_LINEAR, 0, S.INF_LINEAR));
             }
 
-            plan.reels.push({
+            var rp = {
                 index: i,
-                x: i * (L.cellW + L.gapX) + L.cellW / 2,
+                x: S.reelCenterX(L, i),
                 strip: strip.items,
-                startIndex: startIdx,
-                endIndex: endIdx,
+                startIndex: strip.startIndex,
+                endIndex: strip.endIndex,
                 fill: fill,
-                speed: v,
+                speed: scale * Math.max(v1, vLast),
+                speeds: [scale * v1, scale * vLast],
                 startY: y0,
                 endY: yEnd,
+                spinStart: tS,
+                accelEnd: t2,
+                decelStart: t3,
                 stopTime: tStop,
                 settleTime: t5,
                 keys: keys
-            });
+            };
+            plan.reels.push(rp);
             plan.markers.push({ t: tStop, label: "R" + (i + 1) + " STOP" });
-            if (t5 > plan.endTime) { plan.endTime = t5; }
+            if (t5 > plan.allSettled) { plan.allSettled = t5; }
+
+            if (R.frame) {
+                var fs = snap(T0 + R.frameStart);
+                if (fs >= tStop - EPS) {
+                    errors.push(tag + "\u7E5E\u6846\u958B\u59CB\u6642\u9593\u5FC5\u9808\u65E9\u65BC\u505C\u8F2A\u6642\u9593");
+                } else {
+                    plan.frames.push({ reel: i, start: fs, end: snap(t5 + Math.max(0, F.hold)), x: rp.x });
+                    plan.markers.push({ t: fs, label: "R" + (i + 1) + " FRAME" });
+                }
+            }
+        }
+        plan.endTime = plan.allSettled;
+        for (i = 0; i < plan.frames.length; i++) {
+            plan.endTime = Math.max(plan.endTime, plan.frames[i].end + Math.max(0, F.fade));
+        }
+
+        for (i = 0; i < cfg.lines.length; i++) {
+            var ln = cfg.lines[i];
+            var pat = LN.parsePattern(ln.pattern, reels, rows);
+            var shows = LN.parseShows(ln.shows);
+            if (!pat || !shows || !shows.length) {
+                errors.push("\u9023\u7DDA " + (i + 1) + " \u8A2D\u5B9A\u932F\u8AA4");
+                continue;
+            }
+            var count = Math.round(U.clamp(ln.count, 1, reels));
+            var cells = [], points = [], r;
+            for (r = 0; r < reels; r++) {
+                if (r < count) { cells.push([r, pat[r]]); }
+                if (cfg.lineStyle.full || r < count) { points.push(S.cellCenter(L, r, pat[r])); }
+            }
+
+            if (points.length) {
+                points.unshift([points[0][0] - L.cellW / 2, points[0][1]]);
+                var lp = points[points.length - 1];
+                points.push([lp[0] + L.cellW / 2, lp[1]]);
+            }
+            var abs = [];
+            for (var k = 0; k < shows.length; k++) {
+                var st = snap(plan.allSettled + shows[k].start);
+                var en = atLeast(snap(st + shows[k].dur), st + frame);
+                abs.push({ start: st, end: en });
+                plan.markers.push({ t: st, label: "LINE " + (i + 1) });
+                if (en > plan.endTime) { plan.endTime = en; }
+            }
+            plan.lines.push({ index: i, cells: cells, points: points, shows: abs, color: S.lineColor(ln, i), pattern: pat });
         }
         if (plan.reels.length === reels) {
-            plan.markers.push({ t: plan.endTime, label: "ALL SETTLED" });
+            plan.markers.push({ t: plan.allSettled, label: "ALL SETTLED" });
         }
+        plan.markers = mergeMarkers(plan.markers);
         return plan;
     };
+
+    function mergeMarkers(list) {
+        list.sort(function (a, b) { return a.t - b.t; });
+        var out = [];
+        for (var i = 0; i < list.length; i++) {
+            var last = out[out.length - 1];
+            if (last && Math.abs(last.t - list[i].t) < 1e-6) {
+                if (U.indexOf(last.label.split(" / "), list[i].label) < 0) { last.label += " / " + list[i].label; }
+            } else {
+                out.push({ t: list[i].t, label: list[i].label });
+            }
+        }
+        return out;
+    }
 
     function mkKey(t, y, inSpeed, inInf, outSpeed, outInf) {
         return { t: t, y: y, inSpeed: inSpeed, inInf: inInf, outSpeed: outSpeed, outInf: outInf };
@@ -850,6 +1308,8 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         return k * 100;
     }
 
+    A.REEL_TAG = "SFS_REEL";
+
     function removeReelComp(rc) {
         var solids = [], i;
         for (i = 1; i <= rc.numLayers; i++) {
@@ -868,7 +1328,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             var lyr = boardComp.layer(1);
             var src = lyr.source;
             lyr.remove();
-            if (src && src instanceof CompItem) { reelComps.push(src); }
+            if (src && src instanceof CompItem && src.comment === A.REEL_TAG) { reelComps.push(src); }
         }
         for (var i = 0; i < reelComps.length; i++) {
             try { if (!reelComps[i].usedIn.length) { removeReelComp(reelComps[i]); } } catch (e) {  }
@@ -892,9 +1352,19 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         }
     }
 
+    function key(prop, t, v, hold) {
+        var idx = prop.addKey(t);
+        prop.setValueAtKey(idx, v);
+        if (hold) {
+            prop.setInterpolationTypeAtKey(idx, KeyframeInterpolationType.HOLD, KeyframeInterpolationType.HOLD);
+        }
+        return idx;
+    }
+
     function buildReel(rc, rp, cfg, map, folder) {
         var L = cfg.layout, P = cfg.spin;
         var mb = !!P.motionBlur;
+        rc.comment = A.REEL_TAG;
         rc.motionBlur = mb;
         try {
             rc.shutterAngle = Math.round(U.clamp(P.shutterAngle, 0, 720));
@@ -911,10 +1381,9 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         ctrl.transform.anchorPoint.setValue([0, 0]);
         ctrl.transform.position.setValue([0, rp.startY]);
         ctrl.transform.position.dimensionsSeparated = true;
-        var yProp = ctrl.transform.property("ADBE Position_1");
-        setKeys(yProp, rp.keys);
+        setKeys(ctrl.transform.property("ADBE Position_1"), rp.keys);
 
-        var hasShy = false;
+        var hasShy = false, endLayers = [];
         for (var k = 0; k < rp.strip.length; k++) {
             var s = rp.strip[k];
             var item = map[s.name];
@@ -926,18 +1395,23 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             lyr.transform.scale.setValue([sc, sc]);
             lyr.motionBlur = mb;
             if (s.kind === "start") { lyr.label = 9; }
-            else if (s.kind === "end") { lyr.label = 1; }
+            else if (s.kind === "end") { lyr.label = 1; endLayers[s.n - 1] = { layer: lyr, scale: sc }; }
             else { lyr.shy = true; hasShy = true; }
-            try {
-                if (item instanceof CompItem && item.duration < rc.duration) {
-                    lyr.timeRemapEnabled = true;
-                    lyr.property("ADBE Time Remapping").expression = "loopOut(\"cycle\")";
-                }
-                lyr.outPoint = rc.duration;
-            } catch (e3) {  }
+            fitDuration(lyr, item, rc.duration);
         }
         ctrl.moveToBeginning();
         if (hasShy) { rc.hideShyLayers = true; }
+        return endLayers;
+    }
+
+    function fitDuration(lyr, item, outPoint) {
+        try {
+            if (item instanceof CompItem && lyr.startTime + item.duration < outPoint - 1e-6) {
+                lyr.timeRemapEnabled = true;
+                lyr.property("ADBE Time Remapping").expression = "loopOut(\"cycle\")";
+            }
+            lyr.outPoint = outPoint;
+        } catch (e) {  }
     }
 
     function removeOldMarkers(layer) {
@@ -946,6 +1420,206 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             var v = mk.keyValue(i);
             if (v && v.comment && v.comment.indexOf(A.MARKER_PREFIX) === 0) { mk.removeKey(i); }
         }
+    }
+
+    function newShapeLayer(comp, name) {
+        var lyr = comp.layers.addShape();
+        lyr.name = name;
+        lyr.transform.anchorPoint.setValue([0, 0]);
+        lyr.transform.position.setValue([0, 0]);
+        return lyr;
+    }
+
+    function vecs(lyr, group) {
+        return lyr.property("ADBE Root Vectors Group").property(group).property("ADBE Vectors Group");
+    }
+
+    function addGroup(lyr, name) {
+        var g = lyr.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
+        g.name = name;
+    }
+
+    function addRect(lyr, group, size, pos, roundness) {
+        var r = vecs(lyr, group).addProperty("ADBE Vector Shape - Rect");
+        r.property("ADBE Vector Rect Size").setValue(size);
+        r.property("ADBE Vector Rect Position").setValue(pos);
+        r.property("ADBE Vector Rect Roundness").setValue(roundness);
+    }
+
+    function addPath(lyr, group, points) {
+        var p = vecs(lyr, group).addProperty("ADBE Vector Shape - Group");
+        var sh = new Shape();
+        sh.vertices = points;
+        sh.closed = false;
+        p.property("ADBE Vector Shape").setValue(sh);
+    }
+
+    function addStroke(lyr, group, rgb, width) {
+        var st = vecs(lyr, group).addProperty("ADBE Vector Graphic - Stroke");
+        st.property("ADBE Vector Stroke Color").setValue([rgb[0], rgb[1], rgb[2], 1]);
+        st.property("ADBE Vector Stroke Width").setValue(width);
+        try {
+            st.property("ADBE Vector Stroke Line Cap").setValue(2);
+            st.property("ADBE Vector Stroke Line Join").setValue(2);
+        } catch (e) {  }
+    }
+
+    function addTrim(lyr, group) {
+        vecs(lyr, group).addProperty("ADBE Vector Filter - Trim");
+        return vecs(lyr, group).property("ADBE Vector Filter - Trim");
+    }
+
+    function addGlow(lyr) {
+        try { lyr.property("ADBE Effect Parade").addProperty("ADBE Glo2"); } catch (e) {  }
+    }
+
+    function mixWhite(rgb, k) {
+        return [rgb[0] + (1 - rgb[0]) * k, rgb[1] + (1 - rgb[1]) * k, rgb[2] + (1 - rgb[2]) * k];
+    }
+
+    function fadeInOut(lyr, t0, t1, fade) {
+        lyr.inPoint = t0;
+        lyr.outPoint = t1 + Math.max(0, fade);
+        if (fade <= 0) { return; }
+        var op = lyr.transform.opacity;
+        key(op, t0, 0);
+        key(op, Math.min(t0 + fade, t1), 100);
+        if (t1 > t0 + fade) { key(op, t1, 100); }
+        key(op, t1 + fade, 0);
+    }
+
+    function fitScale(item, w, h, mode) {
+        var iw = item.width * (item.pixelAspect || 1), ih = item.height;
+        if (mode === "stretch") { return [w / iw * 100, h / ih * 100]; }
+        var k = Math.min(w / iw, h / ih) * 100;
+        return [k, k];
+    }
+
+    function placeAsset(comp, item, name, pos, size, mode, t0, t1, fade) {
+        var lyr = comp.layers.add(item);
+        lyr.name = name;
+        lyr.startTime = t0;
+        lyr.transform.position.setValue(pos);
+        lyr.transform.scale.setValue(fitScale(item, size[0], size[1], mode));
+        fitDuration(lyr, item, t1 + Math.max(0, fade));
+        fadeInOut(lyr, t0, t1, fade);
+        return lyr;
+    }
+
+    function buildFrame(board, fp, cfg, plan, asset) {
+        var L = cfg.layout, F = cfg.frame;
+        var w = L.cellW + 2 * F.pad, h = plan.reelH + 2 * F.pad;
+        var pos = [fp.x, plan.margin + plan.reelH / 2];
+        var name = "Frame R" + (fp.reel + 1);
+        if (asset) {
+            return placeAsset(board, asset, name, pos, [w, h], "stretch", fp.start, fp.end, F.fade);
+        }
+        var rgb = S.hexToRgb(F.color, [1, 0.78, 0.24]);
+        var round = Math.min(24, w / 4);
+        var lyr = newShapeLayer(board, name);
+
+        var runners = ["Runner A", "Runner B"];
+        for (var i = 0; i < runners.length; i++) {
+            addGroup(lyr, runners[i]);
+            addRect(lyr, runners[i], [w, h], pos, round);
+            addStroke(lyr, runners[i], mixWhite(rgb, 0.65), Math.max(1, F.width * 0.75));
+            var trim = addTrim(lyr, runners[i]);
+            trim.property("ADBE Vector Trim Start").setValue(0);
+            trim.property("ADBE Vector Trim End").setValue(U.clamp(F.runner, 1, 100));
+            trim.property("ADBE Vector Trim Offset").expression =
+                "time * 360 * " + (Math.round(F.laps * 1000) / 1000) + (i ? " + 180" : "");
+        }
+        addGroup(lyr, "Frame");
+        addRect(lyr, "Frame", [w, h], pos, round);
+        addStroke(lyr, "Frame", rgb, Math.max(1, F.width));
+        if (F.glow) { addGlow(lyr); }
+        lyr.label = 11;
+        fadeInOut(lyr, fp.start, fp.end, F.fade);
+        return lyr;
+    }
+
+    function buildLine(board, pl, cfg, plan, cellAsset) {
+        var L = cfg.layout, LS = cfg.lineStyle, i, k;
+        var lyr = newShapeLayer(board, "Line " + (pl.index + 1));
+        addGroup(lyr, "Line");
+        addPath(lyr, "Line", pl.points);
+        addStroke(lyr, "Line", pl.color, Math.max(1, LS.width));
+        addTrim(lyr, "Line");
+        if (LS.boxes && !cellAsset) {
+            addGroup(lyr, "Boxes");
+            for (i = 0; i < pl.cells.length; i++) {
+                addRect(lyr, "Boxes", [L.cellW - LS.boxWidth, L.cellH - LS.boxWidth],
+                    S.cellCenter(L, pl.cells[i][0], pl.cells[i][1]), Math.min(20, L.cellW / 6));
+            }
+            addStroke(lyr, "Boxes", pl.color, Math.max(1, LS.boxWidth));
+        }
+        if (LS.glow) { addGlow(lyr); }
+        lyr.label = 13;
+
+        var trimEnd = vecs(lyr, "Line").property("ADBE Vector Filter - Trim").property("ADBE Vector Trim End");
+        var op = lyr.transform.opacity;
+        for (k = 0; k < pl.shows.length; k++) {
+            var sh = pl.shows[k];
+            var draw = Math.min(Math.max(0, LS.drawTime), (sh.end - sh.start) / 2);
+            if (draw > 0) {
+                key(trimEnd, sh.start, 0);
+                key(trimEnd, sh.start + draw, 100, true);
+            }
+            key(op, sh.start, 100, true);
+            key(op, sh.end, 0, true);
+        }
+        if (!trimEnd.numKeys) { trimEnd.setValue(100); }
+        lyr.inPoint = pl.shows[0].start;
+        lyr.outPoint = pl.shows[pl.shows.length - 1].end;
+
+        if (cellAsset) {
+            for (k = 0; k < pl.shows.length; k++) {
+                for (i = 0; i < pl.cells.length; i++) {
+                    placeAsset(board, cellAsset, "Win L" + (pl.index + 1) + " R" + (pl.cells[i][0] + 1) + "-" + (pl.cells[i][1] + 1),
+                        S.cellCenter(L, pl.cells[i][0], pl.cells[i][1]), [L.cellW, L.cellH], "fit",
+                        pl.shows[k].start, pl.shows[k].end, 0);
+                }
+            }
+        }
+        return lyr;
+    }
+
+    function addPulses(plan, endLayers, pulse) {
+        if (!(pulse > 100) || !plan.lines.length) { return; }
+        var times = {}, i, k, c;
+        for (i = 0; i < plan.lines.length; i++) {
+            var pl = plan.lines[i];
+            for (k = 0; k < pl.shows.length; k++) {
+                for (c = 0; c < pl.cells.length; c++) {
+                    var id = pl.cells[c][0] + "_" + pl.cells[c][1];
+                    (times[id] = times[id] || []).push(pl.shows[k].start);
+                }
+            }
+        }
+        var up = 0.1, down = 0.22;
+        for (var id2 in times) {
+            if (!times.hasOwnProperty(id2)) { continue; }
+            var rc = id2.split("_");
+            var ent = endLayers[parseInt(rc[0], 10)] ? endLayers[parseInt(rc[0], 10)][parseInt(rc[1], 10)] : null;
+            if (!ent) { continue; }
+            var list = times[id2].sort(function (a, b) { return a - b; });
+            var prop = ent.layer.transform.scale, base = ent.scale, big = ent.scale * pulse / 100, lastEnd = -1;
+            for (k = 0; k < list.length; k++) {
+                if (list[k] < lastEnd) { continue; }
+                key(prop, list[k], [base, base]);
+                key(prop, list[k] + up, [big, big]);
+                key(prop, list[k] + up + down, [base, base]);
+                lastEnd = list[k] + up + down + 0.01;
+            }
+        }
+    }
+
+    function resolveAsset(holder, idKey, nameKey, pathKey) {
+        var entry = { name: holder[nameKey], path: holder[pathKey], itemId: holder[idKey] };
+        if (!entry.name && !entry.path && !entry.itemId) { return null; }
+        var it = A.resolveSymbol(entry, true);
+        if (it) { holder[idKey] = it.id; }
+        return it;
     }
 
     A.build = function (cfg, options) {
@@ -963,7 +1637,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         var target = update ? boardLayer.containingComp : (L.target === "new" ? null : A.activeComp());
         var offset = update ? boardLayer.startTime : 0;
         if (!update && L.target !== "new" && !target) {
-            result.errors.push("\u8ACB\u5148\u958B\u555F\u4E00\u500B\u5408\u6210\uFF08\u6216\u5728\u300C\u7248\u9762\u300D\u628A\u76EE\u6A19\u6539\u6210\u300C\u65B0\u5EFA\u5408\u6210\u300D\uFF09");
+            result.errors.push("\u8ACB\u5148\u958B\u555F\u4E00\u500B\u5408\u6210\uFF08\u6216\u5728\u300C\u8A2D\u5B9A\u300D\u628A\u8F38\u51FA\u6539\u6210\u300C\u65B0\u5EFA\u5408\u6210\u300D\uFF09");
             return result;
         }
         if (cfg.spin.startTime - offset < 0) {
@@ -974,6 +1648,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         var fps = target ? target.frameRate : L.newCompFps;
         var plan = S.computePlan(cfg, fps, { timeOffset: offset });
         if (plan.errors.length) { result.errors = plan.errors; return result; }
+        result.warnings = result.warnings.concat(plan.warnings);
 
         app.beginUndoGroup(update ? "SlotFakeSpin \u66F4\u65B0\u76E4\u9762" : "SlotFakeSpin \u5EFA\u7ACB\u5047\u8F49");
         try {
@@ -987,14 +1662,24 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 result.errors.push("\u627E\u4E0D\u5230\u9019\u4E9B\u7B26\u865F\u7684\u7D20\u6750\uFF1A" + missing.join(", ") + "\uFF08\u8ACB\u91CD\u65B0\u532F\u5165\u6216\u5F9E\u7B26\u865F\u5EAB\u79FB\u9664\uFF09");
                 return result;
             }
+            var frameAsset = null, cellAsset = null;
+            if (cfg.frame.source === "custom" && plan.frames.length) {
+                frameAsset = resolveAsset(cfg.frame, "itemId", "itemName", "path");
+                if (!frameAsset) { result.errors.push("\u627E\u4E0D\u5230\u7E5E\u6846\u7D20\u6750\u300C" + cfg.frame.itemName + "\u300D\uFF0C\u8ACB\u5728\u300C\u6F14\u51FA\u300D\u91CD\u65B0\u6307\u5B9A"); return result; }
+            }
+            if (cfg.lineStyle.cellSource === "custom" && plan.lines.length) {
+                cellAsset = resolveAsset(cfg.lineStyle, "cellItemId", "cellItemName", "cellPath");
+                if (!cellAsset) { result.errors.push("\u627E\u4E0D\u5230\u4E2D\u734E\u683C\u7D20\u6750\u300C" + cfg.lineStyle.cellItemName + "\u300D\uFF0C\u8ACB\u5728\u300C\u6F14\u51FA\u300D\u91CD\u65B0\u6307\u5B9A"); return result; }
+            }
 
             var root = A.ensureFolder(A.ROOT_FOLDER);
             var need = plan.endTime + 1;
             var duration;
             if (!target) {
                 duration = Math.max(5, Math.ceil(need + 1));
-                var tw = plan.boardW <= 1720 && plan.boardH <= 880 ? 1920 : Math.ceil(plan.boardW * 1.1 / 2) * 2;
-                var th = plan.boardW <= 1720 && plan.boardH <= 880 ? 1080 : Math.ceil(plan.boardH * 1.1 / 2) * 2;
+                var fits = plan.boardW <= 1920 && plan.boardH <= 1080;
+                var tw = fits ? 1920 : Math.ceil(plan.boardW * 1.1 / 2) * 2;
+                var th = fits ? 1080 : Math.ceil(plan.boardH * 1.1 / 2) * 2;
                 target = app.project.items.addComp(uniqueProjectName("SFS_Main"),
                     Math.max(4, tw), Math.max(4, th), 1, duration, fps);
                 target.parentFolder = root;
@@ -1002,7 +1687,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             } else {
                 duration = Math.max(target.duration - offset, need);
                 if (offset + plan.endTime > target.duration) {
-                    result.warnings.push("\u76EE\u6A19\u5408\u6210\u9577\u5EA6\u4E0D\u8DB3\uFF0C\u6700\u5F8C\u4E00\u8F2A\u6703\u5728\u5408\u6210\u7D50\u675F\u5F8C\u624D\u505C\uFF08\u9700\u8981 " +
+                    result.warnings.push("\u76EE\u6A19\u5408\u6210\u9577\u5EA6\u4E0D\u8DB3\uFF0C\u6F14\u51FA\u6703\u5728\u5408\u6210\u7D50\u675F\u5F8C\u624D\u5B8C\u6210\uFF08\u9700\u8981 " +
                         (Math.round((offset + plan.endTime) * 100) / 100) + " \u79D2\uFF09");
                 }
             }
@@ -1025,16 +1710,20 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             }
             boardComp.motionBlur = !!cfg.spin.motionBlur;
 
+            var endLayers = [];
             for (i = plan.reels.length - 1; i >= 0; i--) {
                 var rp = plan.reels[i];
                 var rc = app.project.items.addComp(boardComp.name + "_R" + (rp.index + 1),
                     plan.reelW, plan.reelH, 1, duration, fps);
                 rc.parentFolder = folder;
-                buildReel(rc, rp, cfg, map, folder);
+                endLayers[rp.index] = buildReel(rc, rp, cfg, map, folder);
                 var rl = boardComp.layers.add(rc);
                 rl.name = "Reel " + (rp.index + 1);
-                rl.transform.position.setValue([rp.x, plan.boardH / 2]);
+                rl.transform.position.setValue([rp.x, plan.margin + plan.reelH / 2]);
             }
+            for (i = 0; i < plan.frames.length; i++) { buildFrame(boardComp, plan.frames[i], cfg, plan, frameAsset); }
+            for (i = 0; i < plan.lines.length; i++) { buildLine(boardComp, plan.lines[i], cfg, plan, cellAsset); }
+            addPulses(plan, endLayers, cfg.lineStyle.pulse);
 
             if (!boardLayer) {
                 boardLayer = target.layers.add(boardComp);
@@ -1072,9 +1761,9 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
 
 // ---- ui.js ----
 (function (S) {
-    var U = S.util, A = S.ae;
+    var U = S.util, A = S.ae, LN = S.lines;
     var UI = S.ui = {};
-    var SEC = "SlotFakeSpin", KEY_CFG = "lastConfig_v1", KEY_THUMB = "thumbs";
+    var SEC = "SlotFakeSpin", KEY_CFG = "lastConfig_v2", KEY_THUMB = "thumbs";
     var IS_MAC = (typeof $ !== "undefined" && $.os && $.os.indexOf("Mac") >= 0);
     var THUMB_RE = /\.(png|jpe?g)$/i;
 
@@ -1109,6 +1798,17 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
     }
 
     function fmt(v) { return String(Math.round(v * 1000) / 1000); }
+    function fmt2(v) { return String(Math.round(v * 100) / 100); }
+
+    function pickColor(hex) {
+        try {
+            if (typeof $ === "undefined" || !$.colorPicker) { return null; }
+            var cur = parseInt(String(hex || "#FFFFFF").replace("#", ""), 16);
+            var c = $.colorPicker(isNaN(cur) ? 0xFFFFFF : cur);
+            if (c < 0) { return null; }
+            return S.rgbToHex([((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255]);
+        } catch (e) { return null; }
+    }
 
     UI.create = function (thisObj) {
         var st = {
@@ -1119,7 +1819,11 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             missing: {},
             useThumbs: getSetting(KEY_THUMB) !== "0",
             cells: [],
-            fields: []
+            fields: [],
+            reelFields: [],
+            lineFields: [],
+            timelines: [],
+            plan: null
         };
         var isPanel = (typeof Panel !== "undefined") && (thisObj instanceof Panel);
         var win = isPanel ? thisObj : new Window("palette", S.NAME + " " + S.VERSION, undefined, { resizeable: true });
@@ -1141,14 +1845,33 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             return g;
         }
 
+        function section(parent, title) {
+            var p = parent.add("panel", undefined, title);
+            p.orientation = "column";
+            p.alignChildren = ["left", "top"];
+            p.spacing = 4;
+            p.margins = [8, 12, 8, 6];
+            return p;
+        }
+
         function label(parent, text, width) {
             var t = parent.add("statictext", undefined, text);
-            t.preferredSize.width = width || 64;
+            t.preferredSize.width = width || 56;
+            return t;
+        }
+
+        function hint(parent, text) {
+            var t = parent.add("statictext", undefined, text, { multiline: true });
+            t.preferredSize.width = 330;
             return t;
         }
 
         function relayout() {
             try { win.layout.layout(true); win.layout.resize(); } catch (e) {  }
+        }
+
+        function redraw(ctrl) {
+            try { ctrl.hide(); ctrl.show(); } catch (e) {  }
         }
 
         function numField(parent, text, group, key, unit, opts) {
@@ -1166,9 +1889,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 if (opts.integer) { v = Math.round(v); }
                 st.cfg[group][key] = v;
                 this.text = fmt(v);
-                persist();
-                if (opts.onChange) { opts.onChange(v); }
-                updateInfo();
+                changed(opts.after);
             };
             st.fields.push({ kind: "num", ctrl: et, group: group, key: key });
             return et;
@@ -1182,8 +1903,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             if (opts.tip) { et.helpTip = opts.tip; }
             et.onChange = function () {
                 st.cfg[group][key] = this.text;
-                persist();
-                updateInfo();
+                changed(opts.after);
             };
             st.fields.push({ kind: "text", ctrl: et, group: group, key: key });
             return et;
@@ -1197,22 +1917,53 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             dd.onChange = function () {
                 if (!this.selection) { return; }
                 st.cfg[group][key] = values[this.selection.index];
-                persist();
-                updateInfo();
+                changed(opts.after);
             };
             st.fields.push({ kind: "drop", ctrl: dd, group: group, key: key, values: values });
             return dd;
         }
 
-        function checkField(parent, text, group, key) {
+        function checkField(parent, text, group, key, opts) {
+            opts = opts || {};
             var cb = parent.add("checkbox", undefined, text);
             cb.value = !!st.cfg[group][key];
+            if (opts.tip) { cb.helpTip = opts.tip; }
             cb.onClick = function () {
                 st.cfg[group][key] = this.value;
-                persist();
+                changed(opts.after);
             };
             st.fields.push({ kind: "check", ctrl: cb, group: group, key: key });
             return cb;
+        }
+
+        function colorField(parent, text, holder, key, opts) {
+            opts = opts || {};
+            if (text) { label(parent, text, opts.labelWidth); }
+            var et = parent.add("edittext", undefined, String(holder()[key]));
+            et.characters = 7;
+            et.helpTip = "#RRGGBB" + (opts.allowEmpty ? "\uFF1B\u7A7A\u767D = \u81EA\u52D5\u914D\u8272" : "");
+            var btn = parent.add("button", undefined, "\u9078\u8272");
+            btn.preferredSize.width = 44;
+            function apply(v) {
+                v = U.trim(v).toUpperCase();
+                if (v !== "" && v.charAt(0) !== "#") { v = "#" + v; }
+                if (v === "" ? !opts.allowEmpty : !/^#[0-9A-F]{6}$/.test(v)) { et.text = String(holder()[key]); return; }
+                holder()[key] = v;
+                et.text = v;
+                changed(opts.after);
+            }
+            et.onChange = function () { apply(this.text); };
+            btn.onClick = function () {
+                var c = pickColor(holder()[key] || "#FFFFFF");
+                if (c) { apply(c); }
+            };
+            return et;
+        }
+
+        function changed(after) {
+            if (after) { after(); }
+            persist();
+            updatePlan();
         }
 
         function syncFields() {
@@ -1263,6 +2014,16 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             return (new Date().getTime() % 2147483000) + Math.floor(Math.random() * 600) + 1;
         }
 
+        function curveLabel(k) {
+            var i = U.indexOf(S.CURVE_KEYS, k);
+            return i >= 0 ? S.CURVE_LABELS[i] : k;
+        }
+
+        function currentFps() {
+            var c = A.activeComp();
+            return (st.cfg.layout.target !== "new" && c) ? c.frameRate : st.cfg.layout.newCompFps;
+        }
+
         function getThumb(name) {
             if (!name) { return null; }
             var e = findSymbol(name);
@@ -1277,12 +2038,23 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             return img;
         }
 
+        function newPen(g, rgba, w) { return g.newPen(g.PenType.SOLID_COLOR, rgba, w || 1); }
+
+        function fillRect(g, x, y, w, h, rgba) {
+            if (w <= 0 || h <= 0) { return; }
+            g.newPath();
+            g.rectPath(x, y, w, h);
+            g.fillPath(g.newBrush(g.BrushType.SOLID_COLOR, rgba));
+        }
+
+        function smallFont(size) {
+            try { return ScriptUI.newFont("dialog", "REGULAR", size); } catch (e) { return null; }
+        }
+
         function drawThumb(ctrl, name, w, h, bgColor) {
             var g = ctrl.graphics;
-            g.newPath();
-            g.rectPath(0, 0, w, h);
-            g.fillPath(g.newBrush(g.BrushType.SOLID_COLOR, bgColor));
-            var pen = g.newPen(g.PenType.SOLID_COLOR, [0.92, 0.92, 0.92, 1], 1);
+            fillRect(g, 0, 0, w, h, bgColor);
+            var pen = newPen(g, [0.92, 0.92, 0.92, 1]);
             var img = getThumb(name);
             var text = name || "-";
             var labelH = img ? 12 : 0;
@@ -1292,8 +2064,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 var dw = Math.max(1, iw * sc), dh = Math.max(1, ih * sc);
                 g.drawImage(img, (w - dw) / 2, (h - labelH - dh) / 2 + 1, dw, dh);
             }
-            var font = g.font;
-            try { font = ScriptUI.newFont("dialog", "REGULAR", img ? 9 : 11); } catch (e1) {  }
+            var font = smallFont(img ? 9 : 11) || g.font;
             var maxChars = Math.max(2, Math.floor(w / 6));
             if (text.length > maxChars) { text = text.substring(0, maxChars - 1) + "\u2026"; }
             var tw = g.measureString(text, font)[0];
@@ -1301,7 +2072,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             g.drawString(text, pen, Math.max(1, (w - tw) / 2), ty, font);
             g.newPath();
             g.rectPath(0, 0, w, h);
-            g.strokePath(g.newPen(g.PenType.SOLID_COLOR, [0.45, 0.45, 0.45, 1], 1));
+            g.strokePath(newPen(g, [0.45, 0.45, 0.45, 1]));
         }
 
         function drawCell() {
@@ -1311,13 +2082,79 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             } catch (e) {  }
         }
 
+        function drawTimeline() {
+            var g = this.graphics, w = this.size[0], h = this.size[1];
+            try {
+                fillRect(g, 0, 0, w, h, [0.1, 0.1, 0.12, 1]);
+                var font = smallFont(9) || g.font;
+                var textPen = newPen(g, [0.85, 0.85, 0.85, 1]);
+                var plan = st.plan;
+                if (!plan || plan.errors.length || !plan.reels.length) {
+                    g.drawString(plan && plan.errors.length ? "\u26A0 " + plan.errors[0] : "\uFF08\u5C1A\u7121\u7BC0\u594F\uFF09", textPen, 6, 6, font);
+                    return;
+                }
+                var n = plan.reels.length, hasLines = plan.lines.length > 0;
+                var labelW = 28, top = 4, axisH = 14;
+                var rowH = Math.max(6, Math.floor((h - top - axisH) / (n + (hasLines ? 1 : 0))));
+                var T0 = plan.startTime, T1 = Math.max(plan.endTime, T0 + 0.5) + 0.15;
+                var sc = (w - labelW - 6) / (T1 - T0);
+                var X = function (t) { return labelW + (t - T0) * sc; };
+
+                var gridPen = newPen(g, [0.22, 0.22, 0.26, 1]);
+                for (var t = 0; T0 + t <= T1; t += 0.5) {
+                    var gx = X(T0 + t);
+                    g.newPath(); g.moveTo(gx, top); g.lineTo(gx, h - axisH); g.strokePath(gridPen);
+                    if (Math.abs(t - Math.round(t)) < 1e-6) {
+                        g.drawString(String(Math.round(t)) + "s", textPen, gx - 4, h - axisH + 1, font);
+                    }
+                }
+                for (var i = 0; i < n; i++) {
+                    var rp = plan.reels[i], y = top + i * rowH, bh = Math.max(3, rowH - 3);
+                    g.drawString("R" + (rp.index + 1), textPen, 4, y + (bh - 10) / 2, font);
+                    fillRect(g, X(rp.spinStart), y, X(rp.decelStart) - X(rp.spinStart), bh, [0.22, 0.48, 0.92, 1]);
+                    fillRect(g, X(rp.decelStart), y, X(rp.stopTime) - X(rp.decelStart), bh, [0.55, 0.75, 1, 1]);
+                    fillRect(g, X(rp.stopTime), y, X(rp.settleTime) - X(rp.stopTime), bh, [0.5, 0.5, 0.55, 1]);
+                    fillRect(g, X(rp.stopTime) - 1, y - 1, 2, bh + 2, [1, 1, 1, 1]);
+                }
+                for (i = 0; i < plan.frames.length; i++) {
+                    var fr = plan.frames[i], fy = top + fr.reel * rowH;
+                    var orange = [1, 0.72, 0.18, 1];
+                    fillRect(g, X(fr.start), fy, X(fr.end) - X(fr.start), 2, orange);
+                    fillRect(g, X(fr.start), fy + Math.max(3, rowH - 3) - 2, X(fr.end) - X(fr.start), 2, orange);
+                }
+                if (hasLines) {
+                    var ly = top + n * rowH, stripe = Math.max(2, Math.floor((rowH - 2) / plan.lines.length));
+                    g.drawString("\u9023\u7DDA", textPen, 2, ly + (rowH - 12) / 2, font);
+                    for (i = 0; i < plan.lines.length; i++) {
+                        var pl = plan.lines[i], c = pl.color;
+                        for (var k = 0; k < pl.shows.length; k++) {
+                            fillRect(g, X(pl.shows[k].start), ly + i * stripe, X(pl.shows[k].end) - X(pl.shows[k].start),
+                                Math.max(1, stripe - 1), [c[0], c[1], c[2], 1]);
+                        }
+                    }
+                }
+            } catch (e) {  }
+        }
+
+        function addTimeline(parent) {
+            var tl = parent.add("group");
+            tl.preferredSize = [340, 120];
+            tl.onDraw = drawTimeline;
+            tl.helpTip = "\u85CD = \u8F49\u52D5\u3001\u6DFA\u85CD = \u6E1B\u901F\u3001\u767D\u7DDA = \u505C\u8F2A\u3001\u7070 = \u56DE\u5F48\u3001\u6A58\u6846 = \u7E5E\u6846\u3001\u5F69\u8272 = \u9023\u7DDA\u986F\u793A";
+            st.timelines.push(tl);
+            return tl;
+        }
+
         var tabs = win.add("tabbedpanel");
         tabs.alignChildren = ["fill", "top"];
-        var tSym = tabs.add("tab", undefined, "1 \u7B26\u865F");
-        var tBoard = tabs.add("tab", undefined, "2 \u76E4\u9762");
-        var tSpin = tabs.add("tab", undefined, "3 \u52D5\u614B");
-        var tLayout = tabs.add("tab", undefined, "4 \u7248\u9762");
-        var allTabs = [tSym, tBoard, tSpin, tLayout];
+        var tSym = tabs.add("tab", undefined, "\u7B26\u865F");
+        var tBoard = tabs.add("tab", undefined, "\u76E4\u9762");
+        var tRhythm = tabs.add("tab", undefined, "\u7BC0\u594F");
+        var tReels = tabs.add("tab", undefined, "\u5404\u8F2A");
+        var tFrame = tabs.add("tab", undefined, "\u7E5E\u6846");
+        var tLines = tabs.add("tab", undefined, "\u9023\u7DDA");
+        var tSet = tabs.add("tab", undefined, "\u8A2D\u5B9A");
+        var allTabs = [tSym, tBoard, tRhythm, tReels, tFrame, tLines, tSet];
         for (var ti = 0; ti < allTabs.length; ti++) {
             allTabs[ti].orientation = "column";
             allTabs[ti].alignChildren = ["left", "top"];
@@ -1339,8 +2176,8 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         preview.preferredSize = [100, 100];
         preview.onDraw = function () {
             try {
-                var sel = list.selection && list.selection.length ? list.selection[0] : null;
-                var name = sel ? st.cfg.symbols[sel.index].name : "";
+                var idx = selectedIndices(list);
+                var name = idx.length ? st.cfg.symbols[idx[0]].name : "";
                 drawThumb(this, name, this.size[0], this.size[1], [0.12, 0.12, 0.12, 1]);
             } catch (e) {  }
         };
@@ -1351,8 +2188,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         var btnRename = gSymOps.add("button", undefined, "\u6539\u540D");
         var btnRemove = gSymOps.add("button", undefined, "\u79FB\u9664");
         var btnClear = gSymOps.add("button", undefined, "\u6E05\u7A7A");
-        var symHint = tSym.add("statictext", undefined, "\u25CF \u586B\u5145\u7B26\u865F\uFF08\u8F49\u52D5\u4E2D\u96A8\u6A5F\u51FA\u73FE\uFF09  \u25CB \u4E0D\u7576\u586B\u5145\u3000\u96D9\u64CA\u53EF\u5207\u63DB", { multiline: true });
-        symHint.preferredSize.width = 300;
+        hint(tSym, "\u25CF \u586B\u5145\u7B26\u865F\uFF08\u8F49\u52D5\u4E2D\u96A8\u6A5F\u51FA\u73FE\uFF09  \u25CB \u4E0D\u7576\u586B\u5145\u3000\u96D9\u64CA\u53EF\u5207\u63DB");
 
         var gSize = row(tBoard);
         label(gSize, "\u8F2A\u6578", 30);
@@ -1390,64 +2226,191 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         var gOps2 = row(tBoard);
         var btnText = gOps2.add("button", undefined, "\u6587\u5B57\u7DE8\u8F2F\u2026");
         btnText.helpTip = "\u7528\u6587\u5B57\u8F38\u5165\u76E4\u9762\uFF0C\u53EF\u76F4\u63A5\u5F9E Excel / Google \u8A66\u7B97\u8868\u8CBC\u4E0A";
-        var boardHint = tBoard.add("statictext", undefined,
-            "\u9EDE\u683C\u5B50 = \u586B\u5165\u756B\u7B46\u3000Alt+\u9EDE = \u5438\u53D6\u7B26\u865F\u3000Shift+\u9EDE = \u6574\u8F2A\u586B\u5165", { multiline: true });
-        boardHint.preferredSize.width = 300;
+        hint(tBoard, "\u9EDE\u683C\u5B50 = \u586B\u5165\u756B\u7B46\u3000Alt+\u9EDE = \u5438\u53D6\u7B26\u865F\u3000Shift+\u9EDE = \u6574\u8F2A\u586B\u5165");
 
-        var r1 = row(tSpin);
-        var etStart = numField(r1, "\u958B\u59CB\u6642\u9593", "spin", "startTime", "\u79D2", { min: 0, tip: "\u958B\u59CB\u8F49\u52D5\u7684\u6642\u9593\uFF08\u76EE\u6A19\u5408\u6210\u7684\u6642\u9593\uFF09" });
-        var btnCTI = r1.add("button", undefined, "\u53D6\u76EE\u524D\u6642\u9593");
-        var r2 = row(tSpin);
-        numField(r2, "\u7B2C\u4E00\u8F2A\u505C", "spin", "firstStop", "\u79D2", { min: 0.05, tip: "\u5F9E\u958B\u59CB\u8F49\u52D5\u5230\u7B2C 1 \u8F2A\u505C\u4E0B\u7684\u6642\u9593\uFF08\u505C\u8F2A = \u885D\u5230\u6700\u9060\u9EDE\u90A3\u4E00\u523B\uFF0C\u53EF\u5C0D\u9F4A\u97F3\u6548\uFF09" });
-        numField(r2, "\u6BCF\u8F2A\u9593\u9694", "spin", "stagger", "\u79D2", { min: 0, labelWidth: 56 });
-        var r3 = row(tSpin);
-        textField(r3, "\u671F\u5F85\u5EF6\u9072", "spin", "delays", {
-            chars: 16,
-            tip: "\u5404\u8F2A\u984D\u5916\u5EF6\u9072\u79D2\u6578\uFF0C\u7528\u9017\u865F\u5206\u9694\uFF0C\u4F8B\u5982 0,0,0,0.8,0.8\n\u5EF6\u9072\u6703\u7D2F\u52A0\u5230\u5F8C\u9762\u7684\u8F2A\uFF08\u807D\u724C / \u671F\u5F85\u611F\u7528\uFF09"
+        function regen() {
+            if (st.cfg.spin.autoRhythm) { st.cfg.reels = S.generateReels(st.cfg); refreshReelList(); }
+        }
+        var rr1 = row(tRhythm);
+        var etStart = numField(rr1, "\u958B\u59CB\u6642\u9593", "spin", "startTime", "\u79D2", { min: 0, tip: "\u958B\u59CB\u8F49\u52D5\u7684\u6642\u9593\uFF08\u76EE\u6A19\u5408\u6210\u7684\u6642\u9593\uFF09\u3002\u5404\u8F2A\u7684\u6642\u9593\u90FD\u5F9E\u9019\u88E1\u8D77\u7B97" });
+        var btnCTI = rr1.add("button", undefined, "\u53D6\u76EE\u524D\u6642\u9593");
+        var rr2 = row(tRhythm);
+        textField(rr2, "\u8D77\u8F49\u9806\u5E8F", "spin", "startOrder", { chars: 11, after: regen, tip: "\u7A7A\u767D = 1,2,3\u2026\u3002\u4F8B\uFF1A1,2,3,4,5 \u4F9D\u5E8F\u8D77\u8F49\uFF1B1+2+3+4+5 \u540C\u6642\u8D77\u8F49" });
+        numField(rr2, "\u9593\u9694", "spin", "startStagger", "\u79D2", { min: 0, labelWidth: 30, after: regen });
+        var rr3 = row(tRhythm);
+        textField(rr3, "\u505C\u8F2A\u9806\u5E8F", "spin", "stopOrder", {
+            chars: 11, after: regen,
+            tip: "\u9017\u865F = \u5148\u5F8C\uFF0C+ = \u540C\u6642\u505C\u3002\n\u4F8B\uFF1A1,2,3,4,5\uFF08\u5DE6\u5230\u53F3\uFF09\u30015,4,3,2,1\uFF08\u53F3\u5230\u5DE6\uFF09\u30011+2+3,4,5\uFF08\u524D\u4E09\u8F2A\u4E00\u8D77\u505C\uFF09\u30013,2,4,1,5\uFF08\u5F9E\u4E2D\u9593\u5F80\u5916\uFF09"
         });
-        var r4 = row(tSpin);
-        numField(r4, "\u8F49\u901F", "spin", "speed", "\u683C/\u79D2", { min: 0.5, tip: "\u7B49\u901F\u8F49\u52D5\u6642\u6BCF\u79D2\u7D93\u904E\u5E7E\u683C" });
-        dropField(r4, "\u65B9\u5411", "spin", "direction", ["down", "up"], ["\u5411\u4E0B", "\u5411\u4E0A"], { labelWidth: 30 });
-        var r5 = row(tSpin);
-        numField(r5, "\u8D77\u8F49\u62C9\u56DE", "spin", "windupDist", "\u683C", { min: 0, tip: "\u958B\u59CB\u524D\u5148\u53CD\u65B9\u5411\u62C9\u4E00\u9EDE\uFF080 = \u4E0D\u62C9\u56DE\uFF09" });
-        numField(r5, "", "spin", "windupTime", "\u79D2", { min: 0 });
-        var r6 = row(tSpin);
-        numField(r6, "\u52A0\u901F\u6642\u9593", "spin", "accelTime", "\u79D2", { min: 0 });
-        numField(r6, "\u6E1B\u901F\u6642\u9593", "spin", "decelTime", "\u79D2", { min: 0, labelWidth: 56, tip: "\u505C\u8F2A\u524D\u7684\u6E1B\u901F\u6642\u9593\uFF0C\u8D8A\u5C0F\u505C\u5F97\u8D8A\u4E7E\u8106" });
-        var r7 = row(tSpin);
-        numField(r7, "\u505C\u8F2A\u885D\u904E", "spin", "overshoot", "\u683C", { min: 0, tip: "\u505C\u8F2A\u6642\u885D\u904E\u5B9A\u4F4D\u7684\u8DDD\u96E2\uFF080 = \u4E0D\u56DE\u5F48\uFF09" });
-        numField(r7, "\u56DE\u5F48", "spin", "bounceTime", "\u79D2", { min: 0, labelWidth: 30 });
-        var r8 = row(tSpin);
-        var etSeed = numField(r8, "\u4E82\u6578\u7A2E\u5B50", "spin", "seed", "", { min: 1, integer: true, chars: 8, tip: "\u6C7A\u5B9A\u8F49\u52D5\u4E2D\u586B\u5145\u7B26\u865F\u7684\u6392\u5217\uFF0C\u540C\u4E00\u500B\u7A2E\u5B50\u7D50\u679C\u76F8\u540C" });
-        var btnSeed = r8.add("button", undefined, "\u63DB\u4E00\u7D44");
-        var r9 = row(tSpin);
-        checkField(r9, "\u52D5\u614B\u6A21\u7CCA", "spin", "motionBlur");
-        numField(r9, "\u5FEB\u9580\u89D2\u5EA6", "spin", "shutterAngle", "", { min: 0, max: 720, integer: true, labelWidth: 56 });
-        var info = tSpin.add("statictext", undefined, "", { multiline: true });
-        info.preferredSize = [320, 46];
+        var rr4 = row(tRhythm);
+        numField(rr4, "\u7B2C\u4E00\u6B21\u505C", "spin", "firstStop", "\u79D2", { min: 0.05, after: regen, tip: "\u5F9E\u958B\u59CB\u5230\u7B2C\u4E00\u6B21\u505C\u8F2A\uFF08\u505C\u8F2A = \u885D\u5230\u6700\u9060\u9EDE\u90A3\u4E00\u523B\uFF0C\u53EF\u5C0D\u9F4A\u97F3\u6548\uFF09" });
+        numField(rr4, "\u6BCF\u6B21\u9593\u9694", "spin", "stagger", "\u79D2", { min: 0, labelWidth: 52, after: regen });
+        var rr5 = row(tRhythm);
+        textField(rr5, "\u8F49\u901F", "spin", "speeds", {
+            chars: 14, after: regen,
+            tip: "\u683C/\u79D2\u3002\u4E00\u500B\u6578\u5B57 = \u5168\u90E8\u4E00\u6A23\uFF1B\u5217\u8868 = \u4F9D\u505C\u8F2A\u9806\u5E8F\uFF0C\u4F8B\u5982 18,18,20,24,28\uFF08\u8D8A\u5F8C\u9762\u505C\u7684\u8F49\u8D8A\u5FEB\uFF09"
+        });
+        rr5.add("statictext", undefined, "\u683C/\u79D2");
+        var rr6 = row(tRhythm);
+        numField(rr6, "\u6E1B\u901F", "spin", "decelTime", "\u79D2", { min: 0, after: regen, tip: "\u505C\u8F2A\u524D\u7684\u6E1B\u901F\u6642\u9593\uFF0C\u8D8A\u77ED\u505C\u5F97\u8D8A\u4E7E\u8106" });
+        dropField(rr6, "", "spin", "decelCurve", S.CURVE_KEYS, S.CURVE_LABELS, { after: regen });
+        var rr7 = row(tRhythm);
+        numField(rr7, "\u505C\u8F2A\u885D\u904E", "spin", "overshoot", "\u683C", { min: 0, after: regen, tip: "\u505C\u8F2A\u6642\u885D\u904E\u5B9A\u4F4D\u7684\u8DDD\u96E2\uFF080 = \u4E0D\u56DE\u5F48\uFF09" });
+        numField(rr7, "\u56DE\u5F48", "spin", "bounceTime", "\u79D2", { min: 0, labelWidth: 30, after: regen });
+        var pAnt = section(tRhythm, "\u671F\u5F85\uFF08\u6703\u7E5E\u6846\uFF09");
+        var ra1 = row(pAnt);
+        textField(ra1, "\u671F\u5F85\u8F2A", "spin", "antReels", { chars: 7, after: regen, tip: "\u4F8B\u5982 4,5\uFF1A\u7B2C 4\u30015 \u8F2A\u6703\u5EF6\u9577\u8F49\u52D5\u4E26\u7E5E\u6846\uFF08\u807D\u724C\uFF09" });
+        numField(ra1, "\u6BCF\u8F2A\u591A\u8F49", "spin", "antTime", "\u79D2", { min: 0, labelWidth: 52, after: regen, tip: "\u6703\u5F80\u5F8C\u7D2F\u52A0\uFF1A\u7B2C 4 \u8F2A\u591A 0.8\u3001\u7B2C 5 \u8F2A\u518D\u591A 0.8" });
+        var ra2 = row(pAnt);
+        numField(ra2, "\u7E5E\u6846\u8F49\u901F", "spin", "antSpeed", "\u683C/\u79D2", { min: 0, after: regen, tip: "\u7E5E\u6846\u958B\u59CB\u5F8C\u5207\u63DB\u5230\u7684\u8F49\u901F\uFF0C0 = \u4E0D\u8B8A" });
+        var ra3 = row(pAnt);
+        numField(ra3, "\u671F\u5F85\u6E1B\u901F", "spin", "antDecelTime", "\u79D2", { min: 0, after: regen });
+        dropField(ra3, "", "spin", "antCurve", S.CURVE_KEYS, S.CURVE_LABELS, { after: regen });
+        var rr8 = row(tRhythm);
+        var cbAuto = checkField(rr8, "\u81EA\u52D5\u5957\u7528\u5230\u5404\u8F2A", "spin", "autoRhythm", {
+            after: regen, tip: "\u52FE\u9078\u6642\uFF0C\u6539\u4E0A\u9762\u7684\u53C3\u6578\u6703\u7ACB\u523B\u91CD\u65B0\u7522\u751F\u300C\u5404\u8F2A\u300D\u8868\u683C\u3002\u624B\u52D5\u6539\u904E\u5404\u8F2A\u5F8C\u6703\u81EA\u52D5\u53D6\u6D88\u52FE\u9078\u3002"
+        });
+        var btnApplyRhythm = rr8.add("button", undefined, "\u5957\u7528\u7BC0\u594F");
+        addTimeline(tRhythm);
+        var info = tRhythm.add("statictext", undefined, "", { multiline: true });
+        info.preferredSize = [340, 44];
 
-        var l1 = row(tLayout);
-        numField(l1, "\u683C\u5BEC", "layout", "cellW", "px", { min: 4, integer: true });
-        numField(l1, "\u683C\u9AD8", "layout", "cellH", "px", { min: 4, integer: true, labelWidth: 40 });
-        var l2 = row(tLayout);
-        numField(l2, "\u8F2A\u8DDD", "layout", "gapX", "px", { min: 0, integer: true, tip: "\u8F2A\u8207\u8F2A\u4E4B\u9593\u7684\u6C34\u5E73\u9593\u8DDD" });
-        numField(l2, "\u5217\u8DDD", "layout", "gapY", "px", { min: 0, integer: true, labelWidth: 40, tip: "\u540C\u4E00\u8F2A\u4E0A\u4E0B\u7B26\u865F\u7684\u9593\u8DDD" });
-        var l3 = row(tLayout);
+        var reelList = tReels.add("listbox", undefined, [], {
+            multiselect: true, numberOfColumns: 8, showHeaders: true,
+            columnTitles: ["\u8F2A", "\u8D77\u8F49", "\u505C\u8F2A", "\u8F49\u901F", "\u6E1B\u901F", "\u885D\u904E", "\u56DE\u5F48", "\u7E5E\u6846"],
+            columnWidths: [30, 40, 40, 40, 70, 36, 36, 60]
+        });
+        reelList.preferredSize = [356, 130];
+        var re1 = row(tReels);
+        reelField(re1, "\u8D77\u8F49", "start", "\u79D2", { min: 0 });
+        reelField(re1, "\u505C\u8F2A", "stop", "\u79D2", { min: 0.05, labelWidth: 30 });
+        var re2 = row(tReels);
+        reelField(re2, "\u8F49\u901F", "speed", "\u683C/\u79D2", { min: 0.1 });
+        var re3 = row(tReels);
+        reelField(re3, "\u6E1B\u901F", "decelTime", "\u79D2", { min: 0 });
+        var ddReelCurve = re3.add("dropdownlist", undefined, S.CURVE_LABELS);
+        ddReelCurve.selection = 0;
+        var re4 = row(tReels);
+        reelField(re4, "\u505C\u8F2A\u885D\u904E", "overshoot", "\u683C", { min: 0 });
+        reelField(re4, "\u56DE\u5F48", "bounceTime", "\u79D2", { min: 0, labelWidth: 30 });
+        var re5 = row(tReels);
+        var cbReelFrame = re5.add("checkbox", undefined, "\u7E5E\u6846");
+        reelField(re5, "\u958B\u59CB", "frameStart", "\u79D2", { min: 0, labelWidth: 30 });
+        reelField(re5, "\u8F49\u901F", "frameSpeed", "", { min: 0, labelWidth: 30, tip: "\u7E5E\u6846\u958B\u59CB\u5F8C\u5207\u63DB\u5230\u7684\u8F49\u901F\uFF08\u683C/\u79D2\uFF09\uFF0C0 = \u4E0D\u8B8A" });
+        var re6 = row(tReels);
+        var btnSelAll = re6.add("button", undefined, "\u5168\u9078");
+        var btnShift = re6.add("button", undefined, "\u6574\u9AD4\u5E73\u79FB\u2026");
+        btnShift.helpTip = "\u628A\u9078\u53D6\u8F2A\u7684\u8D77\u8F49 / \u505C\u8F2A / \u7E5E\u6846\u6642\u9593\u4E00\u8D77\u5F80\u524D\u6216\u5F80\u5F8C\u79FB";
+        hint(tReels, "\u6642\u9593\u90FD\u5F9E\u300C\u958B\u59CB\u6642\u9593\u300D\u7B97\u8D77\uFF08\u79D2\uFF09\u3002\u53EF\u591A\u9078\u4E00\u8D77\u6539\u3002");
+        addTimeline(tReels);
+
+        var fr1 = row(tFrame);
+        var ddFrameSrc = dropField(fr1, "\u7D20\u6750", "frame", "source", ["builtin", "custom"], ["\u5167\u5EFA\u8DD1\u71C8\u6846", "\u81EA\u8A02\u7D20\u6750"]);
+        var btnFrameAsset = fr1.add("button", undefined, "\u6307\u5B9A\u9078\u53D6");
+        btnFrameAsset.helpTip = "\u5728\u5C08\u6848\u9762\u677F\u9078\u4E00\u500B\u7D20\u6750\u6216\u5408\u6210\uFF08\u4F60\u81EA\u5DF1\u7684\u7E5E\u6846\u52D5\u756B\uFF09\uFF0C\u6309\u9019\u88E1\u6307\u5B9A";
+        var stFrameAsset = tFrame.add("statictext", undefined, "");
+        stFrameAsset.preferredSize.width = 330;
+        var fr2 = row(tFrame);
+        colorField(fr2, "\u984F\u8272", function () { return st.cfg.frame; }, "color");
+        numField(fr2, "\u7DDA\u5BEC", "frame", "width", "px", { min: 1, labelWidth: 30 });
+        var fr3 = row(tFrame);
+        numField(fr3, "\u5916\u64F4", "frame", "pad", "px", { min: -100, tip: "\u6846\u6BD4\u8F49\u8F2A\u5927\u591A\u5C11\uFF08\u6BCF\u908A\uFF09" });
+        numField(fr3, "\u8DD1\u71C8", "frame", "laps", "\u5708/\u79D2", { min: 0, labelWidth: 30 });
+        var fr4 = row(tFrame);
+        numField(fr4, "\u8DD1\u71C8\u9577\u5EA6", "frame", "runner", "%", { min: 1, max: 100 });
+        checkField(fr4, "\u5149\u6688", "frame", "glow");
+        var fr5 = row(tFrame);
+        numField(fr5, "\u6DE1\u5165\u6DE1\u51FA", "frame", "fade", "\u79D2", { min: 0 });
+        numField(fr5, "\u505C\u5F8C\u4FDD\u7559", "frame", "hold", "\u79D2", { min: 0, labelWidth: 52 });
+        hint(tFrame, "\u54EA\u5E7E\u8F2A\u8981\u7E5E\u6846\u3001\u4EC0\u9EBC\u6642\u5019\u958B\u59CB\uFF1A\u5728\u300C\u7BC0\u594F\u300D\u8A2D\u5B9A\u671F\u5F85\u8F2A\uFF0C\u6216\u5728\u300C\u5404\u8F2A\u300D\u9010\u8F2A\u52FE\u9078\u300C\u7E5E\u6846\u300D\u4E26\u8A2D\u5B9A\u958B\u59CB\u6642\u9593\u3002\u7E5E\u6846\u6703\u5728\u8A72\u8F2A\u505C\u59A5\u5F8C\u7D50\u675F\u3002");
+
+        var ln1 = row(tLines);
+        var btnPaylines = ln1.add("button", undefined, "\u7DDA\u578B\u8868\u2026");
+        btnPaylines.helpTip = "\u6BCF\u884C\u4E00\u689D\u7DDA\uFF0C\u5BEB\u6BCF\u8F2A\u7B2C\u5E7E\u5217\uFF081 = \u6700\u4E0A\u9762\uFF09\uFF0C\u4F8B\u5982 2 2 2 2 2";
+        textField(ln1, "\u767E\u642D", "lineSet", "wilds", { chars: 6, labelWidth: 30, tip: "\u53EF\u4EE3\u66FF\u4EFB\u4F55\u7B26\u865F\uFF0C\u9017\u865F\u5206\u9694" });
+        numField(ln1, "\u6700\u5C11", "lineSet", "minCount", "\u9023", { min: 1, integer: true, chars: 2, labelWidth: 30 });
+        var ln1b = row(tLines);
+        textField(ln1b, "\u4E0D\u7B97\u9023\u7DDA", "lineSet", "exclude", { chars: 12, tip: "\u9019\u4E9B\u7B26\u865F\u4E0D\u6703\u7B97\u6210\u9023\u7DDA\uFF08\u4F8B\u5982 SCATTER\uFF09\uFF0C\u9017\u865F\u5206\u9694" });
+        var ln2 = row(tLines);
+        var btnDetect = ln2.add("button", undefined, "\u5F9E\u7D50\u679C\u76E4\u9762\u5075\u6E2C");
+        var btnAddLine = ln2.add("button", undefined, "\u65B0\u589E");
+        var btnDelLine = ln2.add("button", undefined, "\u522A\u9664");
+        var lineList = tLines.add("listbox", undefined, [], {
+            multiselect: true, numberOfColumns: 4, showHeaders: true,
+            columnTitles: ["#", "\u7DDA\u578B", "\u9023", "\u986F\u793A\uFF08\u505C\u59A5\u5F8C \u958B\u59CB+\u9577\u5EA6\uFF09"],
+            columnWidths: [26, 84, 26, 200]
+        });
+        lineList.preferredSize = [356, 100];
+        var le1 = row(tLines);
+        var etLinePattern = lineField(le1, "\u7DDA\u578B", "pattern", { chars: 12, tip: "\u6BCF\u8F2A\u7B2C\u5E7E\u5217\uFF081 = \u6700\u4E0A\u9762\uFF09\uFF0C\u4F8B\u5982 1,2,3,2,1" });
+        var etLineCount = lineField(le1, "\u9023", "count", { chars: 2, labelWidth: 20, integer: true });
+        var le2 = row(tLines);
+        var etLineShows = lineField(le2, "\u986F\u793A", "shows", { chars: 22, tip: "\u505C\u59A5\u5F8C\u5E7E\u79D2\u958B\u59CB + \u986F\u793A\u5E7E\u79D2\uFF0C\u53EF\u4EE5\u591A\u6BB5\uFF1A0.3+1.2, 2.5+0.9" });
+        var le3 = row(tLines);
+        var lineColorEt = colorField(le3, "\u984F\u8272", function () { return selectedLine() || { color: "" }; }, "color", {
+            allowEmpty: true, after: function () { refreshLineList(); }
+        });
+        var pLineTime = section(tLines, "\u986F\u793A\u6642\u9593");
+        var lt1 = row(pLineTime);
+        numField(lt1, "\u505C\u59A5\u5F8C", "lineGen", "delay", "\u79D2", { min: 0, labelWidth: 40 });
+        dropField(lt1, "", "lineGen", "mode", S.LINE_MODES, S.LINE_MODE_LABELS);
+        var lt2 = row(pLineTime);
+        numField(lt2, "\u5168\u90E8", "lineGen", "allTime", "\u79D2", { min: 0.05, labelWidth: 30 });
+        numField(lt2, "\u6BCF\u689D", "lineGen", "eachTime", "\u79D2", { min: 0.05, labelWidth: 30 });
+        numField(lt2, "\u9593\u9694", "lineGen", "gap", "", { min: 0, labelWidth: 30 });
+        var btnLineTiming = pLineTime.add("button", undefined, "\u5957\u7528\u5230\u5168\u90E8\u9023\u7DDA");
+        var pLineStyle = section(tLines, "\u6A23\u5F0F");
+        var ls1 = row(pLineStyle);
+        numField(ls1, "\u7DDA\u5BEC", "lineStyle", "width", "px", { min: 1, labelWidth: 30 });
+        numField(ls1, "\u756B\u7DDA", "lineStyle", "drawTime", "\u79D2", { min: 0, labelWidth: 30 });
+        checkField(ls1, "\u756B\u6EFF", "lineStyle", "full", { tip: "\u52FE\u9078 = \u7DDA\u756B\u6EFF\u6574\u500B\u76E4\u9762\uFF1B\u4E0D\u52FE = \u53EA\u756B\u4E2D\u734E\u7684\u90A3\u5E7E\u683C" });
+        var ls2 = row(pLineStyle);
+        checkField(ls2, "\u4E2D\u734E\u6846", "lineStyle", "boxes");
+        numField(ls2, "\u6846\u5BEC", "lineStyle", "boxWidth", "", { min: 1, labelWidth: 30, chars: 3 });
+        numField(ls2, "\u8DF3\u52D5", "lineStyle", "pulse", "%", { min: 100, labelWidth: 30, chars: 4, tip: "\u4E2D\u734E\u7B26\u865F\u653E\u5927\u5230\u5E7E %\uFF0C100 = \u4E0D\u8DF3" });
+        checkField(ls2, "\u5149\u6688", "lineStyle", "glow");
+        var ls3 = row(pLineStyle);
+        dropField(ls3, "\u4E2D\u734E\u683C", "lineStyle", "cellSource", ["builtin", "custom"], ["\u5167\u5EFA\u6846", "\u81EA\u8A02\u7D20\u6750"], { labelWidth: 40 });
+        var btnCellAsset = ls3.add("button", undefined, "\u6307\u5B9A\u9078\u53D6");
+        var stCellAsset = pLineStyle.add("statictext", undefined, "");
+        stCellAsset.preferredSize.width = 320;
+
+        var pLayout = section(tSet, "\u7248\u9762");
+        var l1 = row(pLayout);
+        numField(l1, "\u683C\u5BEC", "layout", "cellW", "px", { min: 4, integer: true, labelWidth: 40 });
+        numField(l1, "\u683C\u9AD8", "layout", "cellH", "px", { min: 4, integer: true, labelWidth: 30 });
+        var l2 = row(pLayout);
+        numField(l2, "\u8F2A\u8DDD", "layout", "gapX", "px", { min: 0, integer: true, labelWidth: 40, tip: "\u8F2A\u8207\u8F2A\u4E4B\u9593\u7684\u6C34\u5E73\u9593\u8DDD" });
+        numField(l2, "\u5217\u8DDD", "layout", "gapY", "px", { min: 0, integer: true, labelWidth: 30, tip: "\u540C\u4E00\u8F2A\u4E0A\u4E0B\u7B26\u865F\u7684\u9593\u8DDD" });
+        var l3 = row(pLayout);
         numField(l3, "\u4E0A\u4E0B\u9732\u51FA", "layout", "peek", "px", { min: 0, integer: true, tip: "\u8F49\u8F2A\u8996\u7A97\u4E0A\u4E0B\u591A\u9732\u51FA\u7684\u9AD8\u5EA6\uFF08\u770B\u5F97\u5230\u534A\u9846\u76F8\u9130\u7B26\u865F\uFF09" });
-        var l4 = row(tLayout);
+        numField(l3, "\u7559\u767D", "layout", "margin", "px", { min: 0, integer: true, labelWidth: 30, tip: "\u76E4\u9762\u5408\u6210\u56DB\u5468\u7559\u767D\uFF0C\u7D66\u7E5E\u6846 / \u9023\u7DDA\u5149\u6688\u7528" });
+        var l4 = row(pLayout);
         dropField(l4, "\u7B26\u865F\u7E2E\u653E", "layout", "scaleMode", ["fit", "none"], ["\u7B26\u5408\u683C\u5B50", "\u539F\u59CB\u5C3A\u5BF8"]);
         numField(l4, "", "layout", "symbolScale", "%", { min: 1 });
-        var l5 = row(tLayout);
+        var l5 = row(pLayout);
         dropField(l5, "\u8F38\u51FA\u5230", "layout", "target", ["active", "new"], ["\u76EE\u524D\u5408\u6210", "\u65B0\u5EFA\u5408\u6210"]);
         numField(l5, "\u65B0\u5408\u6210", "layout", "newCompFps", "fps", { min: 1, max: 120, labelWidth: 40 });
-        var layoutHint = tLayout.add("statictext", undefined,
-            "\u76E4\u9762\u5BEC = \u8F2A\u6578\u00D7\u683C\u5BEC + \u8F2A\u8DDD\uFF1B\u9AD8 = \u5217\u6578\u00D7(\u683C\u9AD8+\u5217\u8DDD) \u2212 \u5217\u8DDD + 2\u00D7\u9732\u51FA", { multiline: true });
-        layoutHint.preferredSize.width = 300;
+        var pFeel = section(tSet, "\u624B\u611F");
+        var f1 = row(pFeel);
+        numField(f1, "\u8D77\u8F49\u62C9\u56DE", "spin", "windupDist", "\u683C", { min: 0, tip: "\u958B\u59CB\u524D\u5148\u53CD\u65B9\u5411\u62C9\u4E00\u9EDE\uFF080 = \u4E0D\u62C9\u56DE\uFF09" });
+        numField(f1, "", "spin", "windupTime", "\u79D2", { min: 0 });
+        var f2 = row(pFeel);
+        numField(f2, "\u52A0\u901F\u6642\u9593", "spin", "accelTime", "\u79D2", { min: 0 });
+        numField(f2, "\u8B8A\u901F\u904E\u6E21", "spin", "speedRamp", "\u79D2", { min: 0, labelWidth: 52, tip: "\u5207\u63DB\u5230\u7E5E\u6846\u8F49\u901F\u7684\u904E\u6E21\u6642\u9593" });
+        var f3 = row(pFeel);
+        dropField(f3, "\u65B9\u5411", "spin", "direction", ["down", "up"], ["\u5411\u4E0B", "\u5411\u4E0A"]);
+        var etSeed = numField(f3, "\u4E82\u6578\u7A2E\u5B50", "spin", "seed", "", { min: 1, integer: true, chars: 6, labelWidth: 52, tip: "\u6C7A\u5B9A\u8F49\u52D5\u4E2D\u586B\u5145\u7B26\u865F\u7684\u6392\u5217\uFF0C\u540C\u4E00\u500B\u7A2E\u5B50\u7D50\u679C\u76F8\u540C" });
+        var btnSeed = f3.add("button", undefined, "\u63DB");
+        btnSeed.preferredSize.width = 30;
+        var f4 = row(pFeel);
+        checkField(f4, "\u52D5\u614B\u6A21\u7CCA", "spin", "motionBlur");
+        numField(f4, "\u5FEB\u9580\u89D2\u5EA6", "spin", "shutterAngle", "", { min: 0, max: 720, integer: true, labelWidth: 52 });
 
         var gAct = row(win);
         gAct.alignChildren = ["fill", "center"];
         var btnBuild = gAct.add("button", undefined, "\u25B6 \u5EFA\u7ACB\u5047\u8F49");
-        btnBuild.helpTip = "\u5728\u76EE\u524D\u5408\u6210\uFF08\u6216\u65B0\u5408\u6210\uFF09\u5EFA\u7ACB\u8F49\u8F2A\u52D5\u756B\uFF0C\u958B\u59CB\u6642\u9593\u5728\u300C\u52D5\u614B\u300D\u9801\u8A2D\u5B9A";
+        btnBuild.helpTip = "\u5728\u76EE\u524D\u5408\u6210\uFF08\u6216\u65B0\u5408\u6210\uFF09\u5EFA\u7ACB\u8F49\u8F2A\u52D5\u756B\u3001\u7E5E\u6846\u8207\u9023\u7DDA";
         var btnUpdate = gAct.add("button", undefined, "\u66F4\u65B0\u9078\u53D6\u76E4\u9762");
         btnUpdate.helpTip = "\u9078\u53D6\u4E4B\u524D\u5EFA\u7ACB\u7684\u76E4\u9762\u5716\u5C64\uFF0C\u7528\u76EE\u524D\u8A2D\u5B9A\u91CD\u5EFA\uFF08\u4FDD\u7559\u5716\u5C64\u4F4D\u7F6E / \u7279\u6548\uFF09";
         var gAct2 = row(win);
@@ -1456,20 +2419,161 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         var btnSave = gAct2.add("button", undefined, "\u5B58\u8A2D\u5B9A\u2026");
         var btnOpen = gAct2.add("button", undefined, "\u958B\u8A2D\u5B9A\u2026");
         var status = win.add("statictext", undefined, "", { multiline: true });
-        status.preferredSize = [320, 32];
+        status.preferredSize = [340, 32];
 
-        function symbolLabel(e) {
-            return (e.filler ? "\u25CF " : "\u25CB ") + e.name + (st.missing[e.name] ? "  (\u907A\u5931)" : "");
-        }
-
-        function selectedSymbolIndices() {
-            var out = [];
-            var sel = list.selection;
+        function selectedIndices(lb) {
+            var out = [], sel = lb.selection;
             if (!sel) { return out; }
             if (sel.length === undefined) { sel = [sel]; }
             for (var i = 0; i < sel.length; i++) { out.push(sel[i].index); }
             out.sort(function (a, b) { return a - b; });
             return out;
+        }
+
+        function selectIndices(lb, idx) {
+            var sel = [];
+            for (var k = 0; k < idx.length; k++) {
+                if (idx[k] < lb.items.length) { sel.push(lb.items[idx[k]]); }
+            }
+            lb.selection = sel.length ? sel : null;
+        }
+
+        function selectedReels() {
+            var idx = selectedIndices(reelList), out = [];
+            for (var i = 0; i < idx.length; i++) { if (st.cfg.reels[idx[i]]) { out.push(st.cfg.reels[idx[i]]); } }
+            return out;
+        }
+
+        function reelsEdited() {
+            if (st.cfg.spin.autoRhythm) {
+                st.cfg.spin.autoRhythm = false;
+                cbAuto.value = false;
+                setStatus("\u5DF2\u624B\u52D5\u8ABF\u6574\u5404\u8F2A\uFF1B\u300C\u7BC0\u594F\u300D\u9801\u6539\u70BA\u6309\u300C\u5957\u7528\u7BC0\u594F\u300D\u624D\u6703\u8986\u84CB");
+            }
+            refreshReelList(true);
+            persist();
+            updatePlan();
+        }
+
+        function reelField(parent, text, key, unit, opts) {
+            opts = opts || {};
+            if (text) { label(parent, text, opts.labelWidth || 52); }
+            var et = parent.add("edittext", undefined, "");
+            et.characters = opts.chars || 5;
+            if (opts.tip) { et.helpTip = opts.tip; }
+            if (unit) { parent.add("statictext", undefined, unit); }
+            et.onChange = function () {
+                var rs = selectedReels();
+                var v = parseFloat(this.text);
+                if (!rs.length || isNaN(v)) { syncReelEditor(); return; }
+                if (opts.min !== undefined && v < opts.min) { v = opts.min; }
+                for (var i = 0; i < rs.length; i++) { rs[i][key] = v; }
+                this.text = fmt(v);
+                reelsEdited();
+            };
+            st.reelFields.push({ ctrl: et, key: key });
+            return et;
+        }
+
+        function syncReelEditor() {
+            var rs = selectedReels(), R = rs.length ? rs[0] : null;
+            for (var i = 0; i < st.reelFields.length; i++) {
+                var f = st.reelFields[i];
+                f.ctrl.text = R ? fmt(R[f.key]) : "";
+                f.ctrl.enabled = !!R;
+            }
+            ddReelCurve.enabled = cbReelFrame.enabled = !!R;
+            if (R) {
+                ddReelCurve.selection = Math.max(0, U.indexOf(S.CURVE_KEYS, R.decelCurve));
+                cbReelFrame.value = !!R.frame;
+            }
+        }
+
+        function refreshReelList(keepSel) {
+            var keep = keepSel ? selectedIndices(reelList) : [];
+            reelList.removeAll();
+            for (var i = 0; i < st.cfg.reels.length; i++) {
+                var R = st.cfg.reels[i];
+                var it = reelList.add("item", "R" + (i + 1));
+                var cols = [fmt2(R.start), fmt2(R.stop), fmt(R.speed), fmt2(R.decelTime) + " " + curveLabel(R.decelCurve),
+                    fmt2(R.overshoot), fmt2(R.bounceTime), R.frame ? "\u5F9E " + fmt2(R.frameStart) + (R.frameSpeed > 0 ? " @" + fmt(R.frameSpeed) : "") : "-"];
+                for (var c = 0; c < cols.length; c++) {
+                    try { it.subItems[c].text = cols[c]; } catch (e) {  }
+                }
+            }
+            selectIndices(reelList, keep.length ? keep : (st.cfg.reels.length ? [0] : []));
+            syncReelEditor();
+        }
+
+        function selectedLine() {
+            var idx = selectedIndices(lineList);
+            return idx.length ? st.cfg.lines[idx[0]] : null;
+        }
+
+        function lineField(parent, text, key, opts) {
+            opts = opts || {};
+            if (text) { label(parent, text, opts.labelWidth || 30); }
+            var et = parent.add("edittext", undefined, "");
+            et.characters = opts.chars || 8;
+            if (opts.tip) { et.helpTip = opts.tip; }
+            et.onChange = function () {
+                var idx = selectedIndices(lineList);
+                if (!idx.length) { this.text = ""; return; }
+                var v = U.trim(this.text);
+                if (opts.integer) {
+                    var n = Math.round(parseFloat(v));
+                    if (isNaN(n)) { syncLineEditor(); return; }
+                    v = Math.max(1, Math.min(st.cfg.layout.reels, n));
+                }
+                for (var i = 0; i < idx.length; i++) { st.cfg.lines[idx[i]][key] = v; }
+                this.text = String(v);
+                refreshLineList(true);
+                persist();
+                updatePlan();
+            };
+            st.lineFields.push({ ctrl: et, key: key });
+            return et;
+        }
+
+        function syncLineEditor() {
+            var ln = selectedLine();
+            for (var i = 0; i < st.lineFields.length; i++) {
+                st.lineFields[i].ctrl.text = ln ? String(ln[st.lineFields[i].key]) : "";
+                st.lineFields[i].ctrl.enabled = !!ln;
+            }
+            lineColorEt.text = ln ? ln.color : "";
+            lineColorEt.enabled = !!ln;
+        }
+
+        function refreshLineList(keepSel) {
+            var keep = keepSel ? selectedIndices(lineList) : [];
+            lineList.removeAll();
+            for (var i = 0; i < st.cfg.lines.length; i++) {
+                var ln = st.cfg.lines[i];
+                var it = lineList.add("item", String(i + 1));
+                var cols = [ln.pattern, String(ln.count), ln.shows];
+                for (var c = 0; c < cols.length; c++) {
+                    try { it.subItems[c].text = cols[c]; } catch (e) {  }
+                }
+            }
+            selectIndices(lineList, keep.length ? keep : (st.cfg.lines.length ? [0] : []));
+            syncLineEditor();
+        }
+
+        function assetLabel(holder, idKey, nameKey) {
+            if (!holder[nameKey] && !holder[idKey]) { return "\uFF08\u5C1A\u672A\u6307\u5B9A\uFF09"; }
+            var it = null;
+            try { it = A.itemById(holder[idKey]); } catch (e) { it = null; }
+            return (it ? "\u7D20\u6750\uFF1A" : "\u7D20\u6750\uFF08\u627E\u4E0D\u5230\uFF09\uFF1A") + holder[nameKey];
+        }
+
+        function refreshAssets() {
+            stFrameAsset.text = st.cfg.frame.source === "custom" ? assetLabel(st.cfg.frame, "itemId", "itemName") : "\u5167\u5EFA\uFF1A\u5713\u89D2\u6846 + \u5169\u9053\u8DD1\u71C8 + \u5149\u6688";
+            stCellAsset.text = st.cfg.lineStyle.cellSource === "custom" ? assetLabel(st.cfg.lineStyle, "cellItemId", "cellItemName") : "";
+        }
+
+        function symbolLabel(e) {
+            return (e.filler ? "\u25CF " : "\u25CB ") + e.name + (st.missing[e.name] ? "  (\u907A\u5931)" : "");
         }
 
         function refreshSymbols(keepIdx) {
@@ -1482,13 +2586,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 if (!it) { st.missing[e.name] = true; }
                 list.add("item", symbolLabel(e));
             }
-            if (keepIdx && keepIdx.length) {
-                var sel = [];
-                for (var k = 0; k < keepIdx.length; k++) {
-                    if (keepIdx[k] < list.items.length) { sel.push(list.items[keepIdx[k]]); }
-                }
-                if (sel.length) { list.selection = sel; }
-            }
+            if (keepIdx && keepIdx.length) { selectIndices(list, keepIdx); }
             refreshBrush();
         }
 
@@ -1548,30 +2646,28 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                     b.sfsName = name;
                     b.text = name || "-";
                     b.helpTip = "\u7B2C " + (r + 1) + " \u8F2A \u7B2C " + (y + 1) + " \u5217\uFF1A" + (name || "\uFF08\u7A7A\uFF09");
-                    if (st.useThumbs) {
-                        try { b.hide(); b.show(); } catch (e) {  }
-                    }
+                    if (st.useThumbs) { redraw(b); }
                 }
             }
         }
 
-        function updateInfo() {
-            try {
-                var c = A.activeComp();
-                var fps = (st.cfg.layout.target !== "new" && c) ? c.frameRate : st.cfg.layout.newCompFps;
-                var plan = S.computePlan(st.cfg, fps, { fillerPool: ["?"] });
-                if (plan.errors.length) { info.text = "\u26A0 " + plan.errors[0]; return; }
-                var stops = [], maxV = 0;
-                for (var i = 0; i < plan.reels.length; i++) {
-                    stops.push(fmt(Math.round(plan.reels[i].stopTime * 100) / 100));
-                    maxV = Math.max(maxV, plan.reels[i].speed / plan.pitch);
-                }
-                info.text = "@" + fmt(fps) + "fps\u3000\u505C\u8F2A(\u79D2)\uFF1A" + stops.join(" / ") +
-                    "\n\u5168\u90E8\u505C\u59A5\uFF1A" + fmt(Math.round(plan.endTime * 100) / 100) + " \u79D2\u3000\u5BE6\u969B\u8F49\u901F \u2248 " +
-                    (Math.round(maxV * 10) / 10) + " \u683C/\u79D2";
-            } catch (e) {
-                info.text = "";
+        function updatePlan() {
+            var plan = null;
+            try { plan = S.computePlan(st.cfg, currentFps(), { fillerPool: ["?"] }); } catch (e) { plan = null; }
+            st.plan = plan;
+            for (var i = 0; i < st.timelines.length; i++) { redraw(st.timelines[i]); }
+            if (!plan) { info.text = ""; return; }
+            if (plan.errors.length) { info.text = "\u26A0 " + plan.errors[0]; return; }
+            var stops = [], maxV = 0;
+            for (i = 0; i < plan.reels.length; i++) {
+                stops.push("R" + (plan.reels[i].index + 1) + " " + fmt2(plan.reels[i].stopTime - plan.startTime));
+                maxV = Math.max(maxV, plan.reels[i].speed / plan.pitch);
             }
+            var txt = "\u505C\u8F2A(\u79D2)\uFF1A" + stops.join("  ") +
+                "\n\u5168\u90E8\u505C\u59A5 " + fmt2(plan.allSettled - plan.startTime) + " \u79D2\u3001\u6F14\u51FA\u7D50\u675F " + fmt2(plan.endTime - plan.startTime) +
+                " \u79D2\uFF08@" + fmt(plan.fps) + "fps\uFF0C\u6700\u9AD8 " + fmt(Math.round(maxV * 10) / 10) + " \u683C/\u79D2\uFF09";
+            if (plan.warnings.length) { txt += "\n\u26A0 " + plan.warnings[0]; }
+            info.text = txt;
         }
 
         function syncAll() {
@@ -1580,7 +2676,10 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             etRows.text = String(st.cfg.layout.rows);
             refreshSymbols();
             rebuildGrid();
-            updateInfo();
+            refreshReelList();
+            refreshLineList();
+            refreshAssets();
+            updatePlan();
         }
 
         function addSymbols(found) {
@@ -1616,6 +2715,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             refreshSymbols();
             refreshCells();
             persist();
+            updatePlan();
             return added;
         }
 
@@ -1645,7 +2745,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         };
 
         function toggleFiller() {
-            var idx = selectedSymbolIndices();
+            var idx = selectedIndices(list);
             for (var i = 0; i < idx.length; i++) {
                 var e = st.cfg.symbols[idx[i]];
                 e.filler = !e.filler;
@@ -1657,9 +2757,9 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         list.onDoubleClick = toggleFiller;
 
         list.onChange = function () {
-            var idx = selectedSymbolIndices();
+            var idx = selectedIndices(list);
             if (idx.length) { setBrush(st.cfg.symbols[idx[0]].name); }
-            try { preview.hide(); preview.show(); } catch (e) {  }
+            redraw(preview);
         };
 
         function replaceInBoards(oldName, newName) {
@@ -1673,8 +2773,14 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             }
         }
 
+        function renameInList(text, oldName, newName) {
+            var parts = S.parseNames(text);
+            for (var i = 0; i < parts.length; i++) { if (parts[i] === oldName) { parts[i] = newName; } }
+            return parts.join(",");
+        }
+
         btnRename.onClick = function () {
-            var idx = selectedSymbolIndices();
+            var idx = selectedIndices(list);
             if (idx.length !== 1) { alert("\u8ACB\u9078\u4E00\u500B\u7B26\u865F", S.NAME); return; }
             var e = st.cfg.symbols[idx[0]];
             var nn = prompt("\u65B0\u7684\u7B26\u865F\u540D\u7A31\uFF08\u6587\u5B57\u7DE8\u8F2F\u76E4\u9762\u6642\u4F7F\u7528\uFF0C\u5EFA\u8B70\u7C21\u77ED\uFF0C\u4F8B\u5982 WILD\u3001A\u30017\uFF09", e.name, S.NAME);
@@ -1685,15 +2791,18 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             others.splice(idx[0], 1);
             nn = S.uniqueName(nn, others);
             replaceInBoards(e.name, nn);
+            st.cfg.lineSet.wilds = renameInList(st.cfg.lineSet.wilds, e.name, nn);
+            st.cfg.lineSet.exclude = renameInList(st.cfg.lineSet.exclude, e.name, nn);
             if (st.brush === e.name) { st.brush = nn; }
             e.name = nn;
             refreshSymbols(idx);
             refreshCells();
+            syncFields();
             persist();
         };
 
         btnRemove.onClick = function () {
-            var idx = selectedSymbolIndices();
+            var idx = selectedIndices(list);
             if (!idx.length) { return; }
             if (!confirm("\u79FB\u9664 " + idx.length + " \u500B\u7B26\u865F\uFF1F\u76E4\u9762\u4E0A\u4F7F\u7528\u5230\u5B83\u5011\u7684\u683C\u5B50\u6703\u6E05\u7A7A\u3002", false, S.NAME)) { return; }
             for (var i = idx.length - 1; i >= 0; i--) {
@@ -1762,9 +2871,20 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             var pool = S.fillerPool(st.cfg), rng = new S.Rng(randomSeed());
             st.cfg.startBoard = fillEmpty(S.board.resize(st.cfg.startBoard, nr, ny, ""), pool, rng);
             st.cfg.endBoard = fillEmpty(S.board.resize(st.cfg.endBoard, nr, ny, ""), pool, rng);
+
+            st.cfg.reels = S.generateReels(st.cfg);
+            var kept = [];
+            for (var i = 0; i < st.cfg.lines.length; i++) {
+                if (LN.parsePattern(st.cfg.lines[i].pattern, nr, ny)) { kept.push(st.cfg.lines[i]); }
+            }
+            var dropped = st.cfg.lines.length - kept.length;
+            st.cfg.lines = kept;
             rebuildGrid();
+            refreshReelList();
+            refreshLineList();
             persist();
-            updateInfo();
+            updatePlan();
+            setStatus("\u76E4\u9762\u6539\u70BA " + nr + "\u00D7" + ny + "\uFF0C\u5DF2\u91CD\u65B0\u7522\u751F\u5404\u8F2A\u7BC0\u594F" + (dropped ? "\uFF0C\u79FB\u9664 " + dropped + " \u689D\u4E0D\u7B26\u7684\u9023\u7DDA" : ""));
         };
 
         btnRandom.onClick = function () {
@@ -1796,31 +2916,42 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             setStatus("\u5DF2\u4E92\u63DB\u8D77\u59CB / \u7D50\u679C\u76E4\u9762");
         };
 
-        btnText.onClick = function () {
-            var L = st.cfg.layout;
-            var which = st.editing === "start" ? "\u8D77\u59CB\u76E4\u9762" : "\u7D50\u679C\u76E4\u9762";
-            var d = new Window("dialog", S.NAME + " - \u6587\u5B57\u7DE8\u8F2F" + which);
+        function textDialog(title, intro, text, extra, onOk) {
+            var d = new Window("dialog", S.NAME + " - " + title);
             d.orientation = "column";
             d.alignChildren = ["fill", "top"];
-            var t1 = d.add("statictext", undefined,
-                "\u6BCF\u4E00\u884C\u662F\u4E00\u5217\uFF08\u7531\u4E0A\u5230\u4E0B\uFF09\uFF0C\u6BCF\u884C " + L.reels + " \u500B\u7B26\u865F\uFF0C\u5171 " + L.rows + " \u884C\u3002\n\u7528\u7A7A\u767D\u5206\u9694\uFF1B\u540D\u7A31\u6709\u7A7A\u767D\u6642\u6539\u7528\u9017\u865F\u6216 Tab\uFF08\u53EF\u76F4\u63A5\u8CBC\u4E0A\u8A66\u7B97\u8868\uFF09\u3002",
-                { multiline: true });
+            var t1 = d.add("statictext", undefined, intro, { multiline: true });
             t1.preferredSize.width = 420;
-            var et = d.add("edittext", undefined, S.board.toText(currentBoard(), L.rows), { multiline: true });
-            et.preferredSize = [420, 150];
-            var t2 = d.add("statictext", undefined, "\u53EF\u7528\u7B26\u865F\uFF1A" + names().join("  "), { multiline: true });
-            t2.preferredSize = [420, 40];
+            var et = d.add("edittext", undefined, text, { multiline: true });
+            et.preferredSize = [420, 160];
+            if (extra) {
+                var t2 = d.add("statictext", undefined, extra, { multiline: true });
+                t2.preferredSize = [420, 40];
+            }
             var gb = d.add("group");
             gb.alignment = "right";
             var ok = gb.add("button", undefined, "\u5957\u7528", { name: "ok" });
             gb.add("button", undefined, "\u53D6\u6D88", { name: "cancel" });
             ok.onClick = function () {
-                var res = S.board.parseText(et.text, L.reels, L.rows, names());
-                if (res.errors.length) { alert(res.errors.join("\n"), S.NAME); return; }
-                setCurrentBoard(res.board);
+                var errs = onOk(et.text);
+                if (errs.length) { alert(errs.join("\n"), S.NAME); return; }
                 d.close(1);
             };
-            d.show();
+            return d.show();
+        }
+
+        btnText.onClick = function () {
+            var L = st.cfg.layout;
+            var which = st.editing === "start" ? "\u8D77\u59CB\u76E4\u9762" : "\u7D50\u679C\u76E4\u9762";
+            textDialog("\u6587\u5B57\u7DE8\u8F2F" + which,
+                "\u6BCF\u4E00\u884C\u662F\u4E00\u5217\uFF08\u7531\u4E0A\u5230\u4E0B\uFF09\uFF0C\u6BCF\u884C " + L.reels + " \u500B\u7B26\u865F\uFF0C\u5171 " + L.rows + " \u884C\u3002\n\u7528\u7A7A\u767D\u5206\u9694\uFF1B\u540D\u7A31\u6709\u7A7A\u767D\u6642\u6539\u7528\u9017\u865F\u6216 Tab\uFF08\u53EF\u76F4\u63A5\u8CBC\u4E0A\u8A66\u7B97\u8868\uFF09\u3002",
+                S.board.toText(currentBoard(), L.rows),
+                "\u53EF\u7528\u7B26\u865F\uFF1A" + names().join("  "),
+                function (text) {
+                    var res = S.board.parseText(text, L.reels, L.rows, names());
+                    if (!res.errors.length) { setCurrentBoard(res.board); }
+                    return res.errors;
+                });
         };
 
         btnCTI.onClick = function () {
@@ -1829,8 +2960,157 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             st.cfg.spin.startTime = Math.round(c.time * c.frameRate) / c.frameRate;
             etStart.text = fmt(st.cfg.spin.startTime);
             persist();
-            updateInfo();
+            updatePlan();
             setStatus("\u958B\u59CB\u6642\u9593 = " + fmt(st.cfg.spin.startTime) + " \u79D2\uFF08\u7B2C " + Math.round(c.time * c.frameRate) + " \u683C\uFF09");
+        };
+
+        btnApplyRhythm.onClick = function () {
+            st.cfg.reels = S.generateReels(st.cfg);
+            refreshReelList();
+            persist();
+            updatePlan();
+            setStatus("\u5DF2\u4F9D\u5FEB\u901F\u7BC0\u594F\u91CD\u65B0\u7522\u751F\u5404\u8F2A");
+        };
+
+        reelList.onChange = function () { syncReelEditor(); };
+
+        ddReelCurve.onChange = function () {
+            var rs = selectedReels();
+            if (!this.selection || !rs.length) { return; }
+            var v = S.CURVE_KEYS[this.selection.index], diff = false;
+            for (var i = 0; i < rs.length; i++) { if (rs[i].decelCurve !== v) { rs[i].decelCurve = v; diff = true; } }
+            if (diff) { reelsEdited(); }
+        };
+
+        cbReelFrame.onClick = function () {
+            var rs = selectedReels();
+            for (var i = 0; i < rs.length; i++) {
+                rs[i].frame = this.value;
+
+                if (this.value && !(rs[i].frameStart > 0 && rs[i].frameStart < rs[i].stop)) {
+                    rs[i].frameStart = Math.max(0, Math.round((rs[i].stop - 1) * 100) / 100);
+                }
+            }
+            reelsEdited();
+        };
+
+        btnSelAll.onClick = function () {
+            var all = [];
+            for (var i = 0; i < reelList.items.length; i++) { all.push(i); }
+            selectIndices(reelList, all);
+            syncReelEditor();
+        };
+
+        btnShift.onClick = function () {
+            var rs = selectedReels();
+            if (!rs.length) { return; }
+            var v = prompt("\u628A\u9078\u53D6\u7684 " + rs.length + " \u8F2A\u6642\u9593\u5E73\u79FB\u5E7E\u79D2\uFF1F\uFF08\u8CA0\u6578 = \u63D0\u65E9\uFF09", "0.1", S.NAME);
+            if (v === null) { return; }
+            var dt = parseFloat(v);
+            if (isNaN(dt)) { return; }
+            for (var i = 0; i < rs.length; i++) {
+                rs[i].start = Math.max(0, Math.round((rs[i].start + dt) * 1000) / 1000);
+                rs[i].stop = Math.max(0.05, Math.round((rs[i].stop + dt) * 1000) / 1000);
+                if (rs[i].frame) { rs[i].frameStart = Math.max(0, Math.round((rs[i].frameStart + dt) * 1000) / 1000); }
+            }
+            reelsEdited();
+        };
+
+        function pickAsset(holder, idKey, nameKey, pathKey) {
+            var found = A.selectedProjectSources();
+            if (!found.length) { alert("\u8ACB\u5148\u5728\u300C\u5C08\u6848\u300D\u9762\u677F\u9078\u53D6\u4E00\u500B\u7D20\u6750\u6216\u5408\u6210", S.NAME); return false; }
+            holder[idKey] = found[0].item.id;
+            holder[nameKey] = found[0].item.name;
+            holder[pathKey] = found[0].path || "";
+            return true;
+        }
+
+        btnFrameAsset.onClick = function () {
+            if (!pickAsset(st.cfg.frame, "itemId", "itemName", "path")) { return; }
+            st.cfg.frame.source = "custom";
+            syncFields();
+            refreshAssets();
+            persist();
+        };
+        ddFrameSrc.onChange = (function (orig) {
+            return function () { orig.call(this); refreshAssets(); };
+        })(ddFrameSrc.onChange);
+
+        btnCellAsset.onClick = function () {
+            if (!pickAsset(st.cfg.lineStyle, "cellItemId", "cellItemName", "cellPath")) { return; }
+            st.cfg.lineStyle.cellSource = "custom";
+            syncFields();
+            refreshAssets();
+            persist();
+        };
+
+        btnPaylines.onClick = function () {
+            var L = st.cfg.layout;
+            var cur = LN.paylines(st.cfg);
+            textDialog("\u7DDA\u578B\u8868",
+                "\u6BCF\u884C\u4E00\u689D\u7DDA\uFF1A\u5BEB\u6BCF\u8F2A\u7B2C\u5E7E\u5217\uFF081 = \u6700\u4E0A\u9762\uFF09\uFF0C\u5171 " + L.reels + " \u500B\u6578\u5B57\u3002\n\u4F8B\uFF1A2 2 2 2 2 \u662F\u4E2D\u9593\u76F4\u7DDA\u30011 2 3 2 1 \u662F V \u5F62\u3002\u6E05\u7A7A = \u7528\u5167\u5EFA\u7DDA\u578B\u3002",
+                LN.paylinesToText(cur.lines), null,
+                function (text) {
+                    var old = st.cfg.lineSet.paylines;
+                    st.cfg.lineSet.paylines = U.trim(text) === "" ? "" : text;
+                    var chk = LN.paylines(st.cfg);
+                    if (chk.errors.length) { st.cfg.lineSet.paylines = old; return chk.errors; }
+                    persist();
+                    setStatus("\u7DDA\u578B\u8868\uFF1A" + chk.lines.length + " \u689D");
+                    return [];
+                });
+        };
+
+        btnDetect.onClick = function () {
+            var res = LN.detect(st.cfg);
+            if (res.errors.length) { alert(res.errors.join("\n"), S.NAME); return; }
+            if (!res.lines.length) { setStatus("\u7D50\u679C\u76E4\u9762\u6C92\u6709\u5075\u6E2C\u5230\u9023\u7DDA"); return; }
+            var lines = [], desc = [];
+            for (var i = 0; i < res.lines.length; i++) {
+                var d = S.lineDefaults();
+                d.pattern = res.lines[i].pattern;
+                d.count = res.lines[i].count;
+                lines.push(d);
+                desc.push("\u7DDA " + res.lines[i].payline + "\uFF1A" + res.lines[i].symbol + "\u00D7" + res.lines[i].count);
+            }
+            st.cfg.lines = LN.applyTiming(lines, st.cfg.lineGen);
+            refreshLineList();
+            persist();
+            updatePlan();
+            setStatus("\u5075\u6E2C\u5230 " + lines.length + " \u689D\u9023\u7DDA\uFF1A" + desc.join("\u3001"));
+        };
+
+        btnAddLine.onClick = function () {
+            var L = st.cfg.layout, d = S.lineDefaults(), p = [];
+            for (var r = 0; r < L.reels; r++) { p.push(Math.floor((L.rows - 1) / 2) + 1); }
+            d.pattern = p.join(",");
+            d.count = L.reels;
+            st.cfg.lines.push(d);
+            LN.applyTiming(st.cfg.lines, st.cfg.lineGen);
+            refreshLineList();
+            selectIndices(lineList, [st.cfg.lines.length - 1]);
+            syncLineEditor();
+            persist();
+            updatePlan();
+        };
+
+        btnDelLine.onClick = function () {
+            var idx = selectedIndices(lineList);
+            for (var i = idx.length - 1; i >= 0; i--) { st.cfg.lines.splice(idx[i], 1); }
+            refreshLineList();
+            persist();
+            updatePlan();
+        };
+
+        lineList.onChange = function () { syncLineEditor(); };
+
+        btnLineTiming.onClick = function () {
+            if (!st.cfg.lines.length) { setStatus("\u9084\u6C92\u6709\u9023\u7DDA"); return; }
+            LN.applyTiming(st.cfg.lines, st.cfg.lineGen);
+            refreshLineList(true);
+            persist();
+            updatePlan();
+            setStatus("\u5DF2\u91CD\u65B0\u6392\u5B9A " + st.cfg.lines.length + " \u689D\u9023\u7DDA\u7684\u986F\u793A\u6642\u9593");
         };
 
         btnSeed.onClick = function () {
@@ -1846,10 +3126,11 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 return;
             }
             var p = res.plan;
-            setStatus(verb + "\u5B8C\u6210\uFF1A" + res.boardComp.name + "\uFF08" + p.reels.length + " \u8F2A\uFF0C\u5168\u90E8\u505C\u59A5 " +
-                fmt(Math.round((p.endTime + (res.boardLayer.startTime || 0)) * 100) / 100) + " \u79D2\uFF09");
+            setStatus(verb + "\u5B8C\u6210\uFF1A" + res.boardComp.name + "\uFF08" + p.reels.length + " \u8F2A\u3001" + p.frames.length + " \u500B\u7E5E\u6846\u3001" +
+                p.lines.length + " \u689D\u9023\u7DDA\uFF0C\u6F14\u51FA\u5230 " + fmt2(p.endTime + (res.boardLayer.startTime || 0)) + " \u79D2\uFF09");
             if (res.warnings.length) { alert(res.warnings.join("\n"), S.NAME); }
-            refreshSymbols(selectedSymbolIndices());
+            refreshSymbols(selectedIndices(list));
+            refreshAssets();
             persist();
         }
 
@@ -1921,10 +3202,14 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             try { this.layout.resize(); } catch (e) {  }
         };
         tabs.selection = st.cfg.symbols.length ? tBoard : tSym;
+        tabs.onChange = function () { updatePlan(); };
         refreshSymbols();
         rebuildGrid();
-        updateInfo();
-        setStatus(st.cfg.symbols.length ? "\u5C31\u7DD2" : "\u7B2C\u4E00\u6B65\uFF1A\u5230\u300C1 \u7B26\u865F\u300D\u532F\u5165\u8001\u864E\u6A5F\u7B26\u865F\u5716\u6A94");
+        refreshReelList();
+        refreshLineList();
+        refreshAssets();
+        updatePlan();
+        setStatus(st.cfg.symbols.length ? "\u5C31\u7DD2" : "\u7B2C\u4E00\u6B65\uFF1A\u5230\u300C\u7B26\u865F\u300D\u532F\u5165\u8001\u864E\u6A5F\u7B26\u865F\u5716\u6A94");
 
         if (win instanceof Window) {
             win.center();

@@ -72,6 +72,7 @@ function install(globalObj, opts) {
       this.keys = []; this.expression = ""; this.dims = Array.isArray(value) ? value.length : 1;
       this.spatial = !!(opts && opts.spatial); this._sep = null; this._owner = opts && opts.owner;
       this.canSeparate = !!(opts && opts.canSeparate);
+      this.any = !!(opts && opts.any);
     }
     get numKeys() { return this.keys.length; }
     get dimensionsSeparated() { return !!this._sep; }
@@ -88,6 +89,7 @@ function install(globalObj, opts) {
       this._check(v); this.value = v;
     }
     _check(v) {
+      if (this.any) return;
       if (this.dims > 1 && (!Array.isArray(v) || v.length < 2)) throw new Error(this.name + " expects array");
       if (this.dims === 1 && typeof v !== "number" && !(v instanceof MarkerValue)) throw new Error(this.name + " expects number, got " + v);
       const arr = Array.isArray(v) ? v : [v];
@@ -126,11 +128,15 @@ function install(globalObj, opts) {
       if (!K.length) return this.value;
       if (t <= K[0].t) return K[0].v;
       if (t >= K[K.length - 1].t) return K[K.length - 1].v;
+      const exact = K.find((k) => Math.abs(k.t - t) < 1e-9);
+      if (exact) return exact.v;
       let j = 0;
       while (K[j + 1].t < t) j++;
       const a = K[j], b = K[j + 1];
       const dt = b.t - a.t;
+      if (Array.isArray(a.v)) return a.v.map((x, i) => x + (b.v[i] - x) * (t - a.t) / dt);
       if (typeof a.v !== "number") return a.v;
+      if (a.outI === KeyframeInterpolationType.HOLD) return a.v;
       if (a.outI !== KeyframeInterpolationType.BEZIER || b.inI !== KeyframeInterpolationType.BEZIER || !a.outE || !b.inE) {
         return a.v + (b.v - a.v) * (t - a.t) / dt;
       }
@@ -172,6 +178,83 @@ function install(globalObj, opts) {
       }
       return null;
     }
+  }
+
+  // ---------------- Property groups (shape contents / effects) ----------------
+  // AE 的行為：群組 addProperty 之後，該群組底下先前取得的屬性參照全部失效（Object is invalid）。
+  // 這裡用「世代」模擬：每個節點記住祖先的世代，祖先一變動，舊包裝就失效。
+  class Shape { constructor() { this.vertices = []; this.inTangents = []; this.outTangents = []; this.closed = true; } }
+  const LEAF_DEFAULTS = {
+    "ADBE Vector Rect Size": [100, 100], "ADBE Vector Rect Position": [0, 0], "ADBE Vector Rect Roundness": 0,
+    "ADBE Vector Shape": "shape",
+    "ADBE Vector Stroke Color": [1, 1, 1, 1], "ADBE Vector Stroke Opacity": 100, "ADBE Vector Stroke Width": 2,
+    "ADBE Vector Stroke Line Cap": 1, "ADBE Vector Stroke Line Join": 1,
+    "ADBE Vector Trim Start": 0, "ADBE Vector Trim End": 100, "ADBE Vector Trim Offset": 0,
+    "ADBE Vector Position": [0, 0], "ADBE Vector Scale": [100, 100], "ADBE Vector Group Opacity": 100,
+  };
+  const GROUP_SCHEMA = {
+    "ADBE Vector Group": { name: "Group", children: ["ADBE Vectors Group", "ADBE Vector Transform Group"] },
+    "ADBE Vectors Group": { name: "Contents", children: [], accepts: "vector" },
+    "ADBE Vector Transform Group": { name: "Transform", children: ["ADBE Vector Position", "ADBE Vector Scale", "ADBE Vector Group Opacity"] },
+    "ADBE Vector Shape - Rect": { name: "Rectangle Path", children: ["ADBE Vector Rect Size", "ADBE Vector Rect Position", "ADBE Vector Rect Roundness"] },
+    "ADBE Vector Shape - Group": { name: "Path", children: ["ADBE Vector Shape"] },
+    "ADBE Vector Graphic - Stroke": { name: "Stroke", children: ["ADBE Vector Stroke Color", "ADBE Vector Stroke Opacity", "ADBE Vector Stroke Width", "ADBE Vector Stroke Line Cap", "ADBE Vector Stroke Line Join"] },
+    "ADBE Vector Filter - Trim": { name: "Trim Paths", children: ["ADBE Vector Trim Start", "ADBE Vector Trim End", "ADBE Vector Trim Offset"] },
+    "ADBE Glo2": { name: "Glow", children: [] },
+    "ADBE Root Vectors Group": { name: "Contents", children: [], accepts: "vector" },
+    "ADBE Effect Parade": { name: "Effects", children: [], accepts: "effect" },
+  };
+  const VECTOR_ITEMS = ["ADBE Vector Group", "ADBE Vector Shape - Rect", "ADBE Vector Shape - Group", "ADBE Vector Graphic - Stroke", "ADBE Vector Filter - Trim"];
+  const EFFECTS = ["ADBE Glo2"];
+
+  function makeNode(mn) {
+    if (GROUP_SCHEMA[mn]) {
+      const sc = GROUP_SCHEMA[mn];
+      const node = { group: true, matchName: mn, name: sc.name, accepts: sc.accepts, gen: 0, children: [] };
+      sc.children.forEach((c) => { const ch = makeNode(c); ch.parent = node; node.children.push(ch); });
+      return node;
+    }
+    if (!(mn in LEAF_DEFAULTS)) throw new Error("mock: unknown matchName " + mn);
+    const d = LEAF_DEFAULTS[mn];
+    return { group: false, matchName: mn, prop: new Property(mn, mn, d === "shape" ? new Shape() : JSON.parse(JSON.stringify(d)), { any: d === "shape" }) };
+  }
+
+  function wrap(node) {
+    const stamps = [];
+    for (let p = node.parent; p; p = p.parent) stamps.push([p, p.gen]);
+    const check = () => {
+      stamps.forEach(([p, g]) => { if (p.gen !== g) throw new Error("Object is invalid (" + node.matchName + ")"); });
+    };
+    if (!node.group) {
+      return new Proxy(node.prop, {
+        get(t, k) { check(); const v = t[k]; return typeof v === "function" ? v.bind(t) : v; },
+        set(t, k, v) { check(); t[k] = v; return true; },
+      });
+    }
+    return {
+      get name() { check(); return node.name; },
+      set name(v) { check(); node.name = String(v); },
+      get matchName() { return node.matchName; },
+      get numProperties() { check(); return node.children.length; },
+      property(k) {
+        check();
+        let ch;
+        if (typeof k === "number") ch = node.children[k - 1];
+        else ch = node.children.find((c) => c.matchName === k) || node.children.find((c) => (c.group ? c.name : c.prop.name) === k);
+        return ch ? wrap(ch) : null;
+      },
+      addProperty(mn) {
+        check();
+        const ok = node.accepts === "vector" ? VECTOR_ITEMS : node.accepts === "effect" ? EFFECTS : [];
+        if (ok.indexOf(mn) < 0) throw new Error("mock: cannot add " + mn + " to " + node.matchName);
+        const ch = makeNode(mn);
+        ch.parent = node;
+        node.gen++;
+        node.children.push(ch);
+        return wrap(ch);
+      },
+      _node: node,
+    };
   }
 
   // ---------------- Items ----------------
@@ -222,6 +305,13 @@ function install(globalObj, opts) {
           if (duration !== undefined) l.outPoint = duration;
           return self._addLayer(l);
         },
+        addShape() {
+          const l = new Layer(self, null);
+          l.name = "Shape Layer " + (self._layers.length + 1);
+          l._outPoint = self.duration;
+          l._contents = makeNode("ADBE Root Vectors Group");
+          return self._addLayer(l);
+        },
         get length() { return self._layers.length; },
       };
     }
@@ -247,6 +337,8 @@ function install(globalObj, opts) {
       this.transform = new TransformGroup(this, comp);
       this._marker = new Property("Marker", "ADBE Marker", new MarkerValue(""));
       this._remap = null;
+      this._effects = makeNode("ADBE Effect Parade");
+      this._contents = null;
     }
     get name() { return this._name; }
     set name(v) { this._name = String(v); }
@@ -274,6 +366,11 @@ function install(globalObj, opts) {
         return this._remap;
       }
       if (mn === "ADBE Transform Group" || mn === "Transform") return this.transform;
+      if (mn === "ADBE Effect Parade" || mn === "Effects") return wrap(this._effects);
+      if (mn === "ADBE Root Vectors Group" || mn === "Contents") {
+        if (!this._contents) throw new Error("not a shape layer");
+        return wrap(this._contents);
+      }
       return null;
     }
     get position() { return this.transform.position; }
@@ -333,7 +430,7 @@ function install(globalObj, opts) {
   };
 
   Object.assign(g, {
-    app, File, Folder, CompItem, FootageItem, FolderItem, AVItem, Layer, Property,
+    app, File, Folder, CompItem, FootageItem, FolderItem, AVItem, Layer, Property, Shape,
     KeyframeEase, KeyframeInterpolationType, MarkerValue, ImportOptions, ImportAsType,
     alert: (m) => { (g.__alerts = g.__alerts || []).push(String(m)); },
     confirm: () => (g.__confirm === undefined ? true : g.__confirm),

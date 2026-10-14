@@ -11,6 +11,8 @@ function install(g) {
       PenType: { SOLID_COLOR: 1 },
       font: { name: "dialog", size: 10 },
       newPath() { graphicsCalls.push("newPath"); },
+      moveTo(x, y) { [x, y].forEach(check); },
+      lineTo(x, y) { [x, y].forEach(check); },
       rectPath(x, y, w, h) { [x, y, w, h].forEach(check); graphicsCalls.push("rectPath"); },
       fillPath(b) { if (!b || b.kind !== "brush") throw new Error("fillPath needs brush"); },
       strokePath(p) { if (!p || p.kind !== "pen") throw new Error("strokePath needs pen"); },
@@ -42,7 +44,9 @@ function install(g) {
       if (type === "item") {
         if (this.type !== "listbox" && this.type !== "dropdownlist") throw new Error("item only in list");
         // ScriptUI: list.add("item", text[, index])
-        const it = { text: String(bounds), index: this.items.length, selected: false, checked: false };
+        const cols = (this.properties.numberOfColumns || 1) - 1;
+        const it = { text: String(bounds), index: this.items.length, selected: false, checked: false, subItems: [] };
+        for (let c = 0; c < cols; c++) it.subItems.push({ text: "" });
         this.items.push(it);
         return it;
       }
@@ -103,6 +107,7 @@ function install(g) {
     newImage(f) { return { size: [256, 256], path: f.fsName }; },
     newFont(name, style, size) { return { name, style, size }; },
   };
+  g.$ = Object.assign(g.$ || {}, { colorPicker: () => (g.__color === undefined ? -1 : g.__color) });
   return { graphicsCalls };
 }
 

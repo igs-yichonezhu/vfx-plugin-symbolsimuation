@@ -224,6 +224,8 @@
         return k * 100;
     }
 
+    A.REEL_TAG = "SFS_REEL";
+
     function removeReelComp(rc) {
         var solids = [], i;
         for (i = 1; i <= rc.numLayers; i++) {
@@ -236,13 +238,14 @@
         }
     }
 
+    // 清空盤面合成；只刪除本工具建立的轉輪合成（使用者的繞框 / 中獎素材不會被刪）
     function clearBoardComp(boardComp) {
         var reelComps = [];
         while (boardComp.numLayers > 0) {
             var lyr = boardComp.layer(1);
             var src = lyr.source;
             lyr.remove();
-            if (src && src instanceof CompItem) { reelComps.push(src); }
+            if (src && src instanceof CompItem && src.comment === A.REEL_TAG) { reelComps.push(src); }
         }
         for (var i = 0; i < reelComps.length; i++) {
             try { if (!reelComps[i].usedIn.length) { removeReelComp(reelComps[i]); } } catch (e) { /* ignore */ }
@@ -266,9 +269,21 @@
         }
     }
 
+    // 加一個關鍵影格；hold = 這格之後保持數值（跳變）
+    function key(prop, t, v, hold) {
+        var idx = prop.addKey(t);
+        prop.setValueAtKey(idx, v);
+        if (hold) {
+            prop.setInterpolationTypeAtKey(idx, KeyframeInterpolationType.HOLD, KeyframeInterpolationType.HOLD);
+        }
+        return idx;
+    }
+
+    // 回傳結果盤面符號圖層 [列] -> layer（給中獎跳動用）
     function buildReel(rc, rp, cfg, map, folder) {
         var L = cfg.layout, P = cfg.spin;
         var mb = !!P.motionBlur;
+        rc.comment = A.REEL_TAG;
         rc.motionBlur = mb;
         try {
             rc.shutterAngle = Math.round(U.clamp(P.shutterAngle, 0, 720));
@@ -285,10 +300,9 @@
         ctrl.transform.anchorPoint.setValue([0, 0]);
         ctrl.transform.position.setValue([0, rp.startY]);
         ctrl.transform.position.dimensionsSeparated = true;
-        var yProp = ctrl.transform.property("ADBE Position_1");
-        setKeys(yProp, rp.keys);
+        setKeys(ctrl.transform.property("ADBE Position_1"), rp.keys);
 
-        var hasShy = false;
+        var hasShy = false, endLayers = [];
         for (var k = 0; k < rp.strip.length; k++) {
             var s = rp.strip[k];
             var item = map[s.name];
@@ -300,18 +314,24 @@
             lyr.transform.scale.setValue([sc, sc]);
             lyr.motionBlur = mb;
             if (s.kind === "start") { lyr.label = 9; }
-            else if (s.kind === "end") { lyr.label = 1; }
+            else if (s.kind === "end") { lyr.label = 1; endLayers[s.n - 1] = { layer: lyr, scale: sc }; }
             else { lyr.shy = true; hasShy = true; }
-            try {
-                if (item instanceof CompItem && item.duration < rc.duration) {
-                    lyr.timeRemapEnabled = true;
-                    lyr.property("ADBE Time Remapping").expression = "loopOut(\"cycle\")";
-                }
-                lyr.outPoint = rc.duration;
-            } catch (e3) { /* 影片素材長度不足時保持原樣 */ }
+            fitDuration(lyr, item, rc.duration);
         }
         ctrl.moveToBeginning();
         if (hasShy) { rc.hideShyLayers = true; }
+        return endLayers;
+    }
+
+    // 合成素材比需要的長度短時，開啟時間重映射循環播放
+    function fitDuration(lyr, item, outPoint) {
+        try {
+            if (item instanceof CompItem && lyr.startTime + item.duration < outPoint - 1e-6) {
+                lyr.timeRemapEnabled = true;
+                lyr.property("ADBE Time Remapping").expression = "loopOut(\"cycle\")";
+            }
+            lyr.outPoint = outPoint;
+        } catch (e) { /* 影片素材長度不足時保持原樣 */ }
     }
 
     function removeOldMarkers(layer) {
@@ -320,6 +340,213 @@
             var v = mk.keyValue(i);
             if (v && v.comment && v.comment.indexOf(A.MARKER_PREFIX) === 0) { mk.removeKey(i); }
         }
+    }
+
+    // ---------------- 形狀圖層小工具 ----------------
+    // 注意：AE 在群組 addProperty 之後，同層之前取得的屬性參照會失效，所以每次都從圖層重新取。
+    function newShapeLayer(comp, name) {
+        var lyr = comp.layers.addShape();
+        lyr.name = name;
+        lyr.transform.anchorPoint.setValue([0, 0]);
+        lyr.transform.position.setValue([0, 0]);
+        return lyr;
+    }
+
+    function vecs(lyr, group) {
+        return lyr.property("ADBE Root Vectors Group").property(group).property("ADBE Vectors Group");
+    }
+
+    function addGroup(lyr, name) {
+        var g = lyr.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
+        g.name = name;
+    }
+
+    function addRect(lyr, group, size, pos, roundness) {
+        var r = vecs(lyr, group).addProperty("ADBE Vector Shape - Rect");
+        r.property("ADBE Vector Rect Size").setValue(size);
+        r.property("ADBE Vector Rect Position").setValue(pos);
+        r.property("ADBE Vector Rect Roundness").setValue(roundness);
+    }
+
+    function addPath(lyr, group, points) {
+        var p = vecs(lyr, group).addProperty("ADBE Vector Shape - Group");
+        var sh = new Shape();
+        sh.vertices = points;
+        sh.closed = false;
+        p.property("ADBE Vector Shape").setValue(sh);
+    }
+
+    function addStroke(lyr, group, rgb, width) {
+        var st = vecs(lyr, group).addProperty("ADBE Vector Graphic - Stroke");
+        st.property("ADBE Vector Stroke Color").setValue([rgb[0], rgb[1], rgb[2], 1]);
+        st.property("ADBE Vector Stroke Width").setValue(width);
+        try {
+            st.property("ADBE Vector Stroke Line Cap").setValue(2);
+            st.property("ADBE Vector Stroke Line Join").setValue(2);
+        } catch (e) { /* ignore */ }
+    }
+
+    function addTrim(lyr, group) {
+        vecs(lyr, group).addProperty("ADBE Vector Filter - Trim");
+        return vecs(lyr, group).property("ADBE Vector Filter - Trim");
+    }
+
+    function addGlow(lyr) {
+        try { lyr.property("ADBE Effect Parade").addProperty("ADBE Glo2"); } catch (e) { /* 沒有 Glow 特效就算了 */ }
+    }
+
+    function mixWhite(rgb, k) {
+        return [rgb[0] + (1 - rgb[0]) * k, rgb[1] + (1 - rgb[1]) * k, rgb[2] + (1 - rgb[2]) * k];
+    }
+
+    // 淡入淡出：t0 淡入、t1 開始淡出
+    function fadeInOut(lyr, t0, t1, fade) {
+        lyr.inPoint = t0;
+        lyr.outPoint = t1 + Math.max(0, fade);
+        if (fade <= 0) { return; }
+        var op = lyr.transform.opacity;
+        key(op, t0, 0);
+        key(op, Math.min(t0 + fade, t1), 100);
+        if (t1 > t0 + fade) { key(op, t1, 100); }
+        key(op, t1 + fade, 0);
+    }
+
+    function fitScale(item, w, h, mode) {
+        var iw = item.width * (item.pixelAspect || 1), ih = item.height;
+        if (mode === "stretch") { return [w / iw * 100, h / ih * 100]; }
+        var k = Math.min(w / iw, h / ih) * 100;
+        return [k, k];
+    }
+
+    function placeAsset(comp, item, name, pos, size, mode, t0, t1, fade) {
+        var lyr = comp.layers.add(item);
+        lyr.name = name;
+        lyr.startTime = t0;
+        lyr.transform.position.setValue(pos);
+        lyr.transform.scale.setValue(fitScale(item, size[0], size[1], mode));
+        fitDuration(lyr, item, t1 + Math.max(0, fade));
+        fadeInOut(lyr, t0, t1, fade);
+        return lyr;
+    }
+
+    // ---------------- 繞框 ----------------
+    function buildFrame(board, fp, cfg, plan, asset) {
+        var L = cfg.layout, F = cfg.frame;
+        var w = L.cellW + 2 * F.pad, h = plan.reelH + 2 * F.pad;
+        var pos = [fp.x, plan.margin + plan.reelH / 2];
+        var name = "Frame R" + (fp.reel + 1);
+        if (asset) {
+            return placeAsset(board, asset, name, pos, [w, h], "stretch", fp.start, fp.end, F.fade);
+        }
+        var rgb = S.hexToRgb(F.color, [1, 0.78, 0.24]);
+        var round = Math.min(24, w / 4);
+        var lyr = newShapeLayer(board, name);
+        // 先加的群組在上層：兩條跑燈壓在外框上
+        var runners = ["Runner A", "Runner B"];
+        for (var i = 0; i < runners.length; i++) {
+            addGroup(lyr, runners[i]);
+            addRect(lyr, runners[i], [w, h], pos, round);
+            addStroke(lyr, runners[i], mixWhite(rgb, 0.65), Math.max(1, F.width * 0.75));
+            var trim = addTrim(lyr, runners[i]);
+            trim.property("ADBE Vector Trim Start").setValue(0);
+            trim.property("ADBE Vector Trim End").setValue(U.clamp(F.runner, 1, 100));
+            trim.property("ADBE Vector Trim Offset").expression =
+                "time * 360 * " + (Math.round(F.laps * 1000) / 1000) + (i ? " + 180" : "");
+        }
+        addGroup(lyr, "Frame");
+        addRect(lyr, "Frame", [w, h], pos, round);
+        addStroke(lyr, "Frame", rgb, Math.max(1, F.width));
+        if (F.glow) { addGlow(lyr); }
+        lyr.label = 11;
+        fadeInOut(lyr, fp.start, fp.end, F.fade);
+        return lyr;
+    }
+
+    // ---------------- 連線 ----------------
+    function buildLine(board, pl, cfg, plan, cellAsset) {
+        var L = cfg.layout, LS = cfg.lineStyle, i, k;
+        var lyr = newShapeLayer(board, "Line " + (pl.index + 1));
+        addGroup(lyr, "Line");
+        addPath(lyr, "Line", pl.points);
+        addStroke(lyr, "Line", pl.color, Math.max(1, LS.width));
+        addTrim(lyr, "Line");
+        if (LS.boxes && !cellAsset) {
+            addGroup(lyr, "Boxes");
+            for (i = 0; i < pl.cells.length; i++) {
+                addRect(lyr, "Boxes", [L.cellW - LS.boxWidth, L.cellH - LS.boxWidth],
+                    S.cellCenter(L, pl.cells[i][0], pl.cells[i][1]), Math.min(20, L.cellW / 6));
+            }
+            addStroke(lyr, "Boxes", pl.color, Math.max(1, LS.boxWidth));
+        }
+        if (LS.glow) { addGlow(lyr); }
+        lyr.label = 13;
+
+        // 結構全部加完才取屬性（之前的參照可能已失效）
+        var trimEnd = vecs(lyr, "Line").property("ADBE Vector Filter - Trim").property("ADBE Vector Trim End");
+        var op = lyr.transform.opacity;
+        for (k = 0; k < pl.shows.length; k++) {
+            var sh = pl.shows[k];
+            var draw = Math.min(Math.max(0, LS.drawTime), (sh.end - sh.start) / 2);
+            if (draw > 0) {
+                key(trimEnd, sh.start, 0);
+                key(trimEnd, sh.start + draw, 100, true);
+            }
+            key(op, sh.start, 100, true);
+            key(op, sh.end, 0, true);
+        }
+        if (!trimEnd.numKeys) { trimEnd.setValue(100); }
+        lyr.inPoint = pl.shows[0].start;
+        lyr.outPoint = pl.shows[pl.shows.length - 1].end;
+
+        if (cellAsset) {
+            for (k = 0; k < pl.shows.length; k++) {
+                for (i = 0; i < pl.cells.length; i++) {
+                    placeAsset(board, cellAsset, "Win L" + (pl.index + 1) + " R" + (pl.cells[i][0] + 1) + "-" + (pl.cells[i][1] + 1),
+                        S.cellCenter(L, pl.cells[i][0], pl.cells[i][1]), [L.cellW, L.cellH], "fit",
+                        pl.shows[k].start, pl.shows[k].end, 0);
+                }
+            }
+        }
+        return lyr;
+    }
+
+    // 中獎符號跳動：每次該格所在的連線出現時放大再縮回
+    function addPulses(plan, endLayers, pulse) {
+        if (!(pulse > 100) || !plan.lines.length) { return; }
+        var times = {}, i, k, c;
+        for (i = 0; i < plan.lines.length; i++) {
+            var pl = plan.lines[i];
+            for (k = 0; k < pl.shows.length; k++) {
+                for (c = 0; c < pl.cells.length; c++) {
+                    var id = pl.cells[c][0] + "_" + pl.cells[c][1];
+                    (times[id] = times[id] || []).push(pl.shows[k].start);
+                }
+            }
+        }
+        var up = 0.1, down = 0.22;
+        for (var id2 in times) {
+            if (!times.hasOwnProperty(id2)) { continue; }
+            var rc = id2.split("_");
+            var ent = endLayers[parseInt(rc[0], 10)] ? endLayers[parseInt(rc[0], 10)][parseInt(rc[1], 10)] : null;
+            if (!ent) { continue; }
+            var list = times[id2].sort(function (a, b) { return a - b; });
+            var prop = ent.layer.transform.scale, base = ent.scale, big = ent.scale * pulse / 100, lastEnd = -1;
+            for (k = 0; k < list.length; k++) {
+                if (list[k] < lastEnd) { continue; }
+                key(prop, list[k], [base, base]);
+                key(prop, list[k] + up, [big, big]);
+                key(prop, list[k] + up + down, [base, base]);
+                lastEnd = list[k] + up + down + 0.01;
+            }
+        }
+    }
+
+    function resolveAsset(holder, idKey, nameKey, pathKey) {
+        var entry = { name: holder[nameKey], path: holder[pathKey], itemId: holder[idKey] };
+        if (!entry.name && !entry.path && !entry.itemId) { return null; }
+        var it = A.resolveSymbol(entry, true);
+        if (it) { holder[idKey] = it.id; }
+        return it;
     }
 
     // options: { boardLayer: 既有盤面圖層（更新模式） }
@@ -339,7 +566,7 @@
         var target = update ? boardLayer.containingComp : (L.target === "new" ? null : A.activeComp());
         var offset = update ? boardLayer.startTime : 0;
         if (!update && L.target !== "new" && !target) {
-            result.errors.push("請先開啟一個合成（或在「版面」把目標改成「新建合成」）");
+            result.errors.push("請先開啟一個合成（或在「設定」把輸出改成「新建合成」）");
             return result;
         }
         if (cfg.spin.startTime - offset < 0) {
@@ -350,10 +577,11 @@
         var fps = target ? target.frameRate : L.newCompFps;
         var plan = S.computePlan(cfg, fps, { timeOffset: offset });
         if (plan.errors.length) { result.errors = plan.errors; return result; }
+        result.warnings = result.warnings.concat(plan.warnings);
 
         app.beginUndoGroup(update ? "SlotFakeSpin 更新盤面" : "SlotFakeSpin 建立假轉");
         try {
-            // 符號
+            // 符號與自訂素材
             var map = {}, missing = [], i;
             for (i = 0; i < cfg.symbols.length; i++) {
                 var it = A.resolveSymbol(cfg.symbols[i], true);
@@ -363,14 +591,24 @@
                 result.errors.push("找不到這些符號的素材：" + missing.join(", ") + "（請重新匯入或從符號庫移除）");
                 return result;
             }
+            var frameAsset = null, cellAsset = null;
+            if (cfg.frame.source === "custom" && plan.frames.length) {
+                frameAsset = resolveAsset(cfg.frame, "itemId", "itemName", "path");
+                if (!frameAsset) { result.errors.push("找不到繞框素材「" + cfg.frame.itemName + "」，請在「演出」重新指定"); return result; }
+            }
+            if (cfg.lineStyle.cellSource === "custom" && plan.lines.length) {
+                cellAsset = resolveAsset(cfg.lineStyle, "cellItemId", "cellItemName", "cellPath");
+                if (!cellAsset) { result.errors.push("找不到中獎格素材「" + cfg.lineStyle.cellItemName + "」，請在「演出」重新指定"); return result; }
+            }
 
             var root = A.ensureFolder(A.ROOT_FOLDER);
             var need = plan.endTime + 1;
             var duration;
             if (!target) {
                 duration = Math.max(5, Math.ceil(need + 1));
-                var tw = plan.boardW <= 1720 && plan.boardH <= 880 ? 1920 : Math.ceil(plan.boardW * 1.1 / 2) * 2;
-                var th = plan.boardW <= 1720 && plan.boardH <= 880 ? 1080 : Math.ceil(plan.boardH * 1.1 / 2) * 2;
+                var fits = plan.boardW <= 1920 && plan.boardH <= 1080;
+                var tw = fits ? 1920 : Math.ceil(plan.boardW * 1.1 / 2) * 2;
+                var th = fits ? 1080 : Math.ceil(plan.boardH * 1.1 / 2) * 2;
                 target = app.project.items.addComp(uniqueProjectName("SFS_Main"),
                     Math.max(4, tw), Math.max(4, th), 1, duration, fps);
                 target.parentFolder = root;
@@ -378,7 +616,7 @@
             } else {
                 duration = Math.max(target.duration - offset, need);
                 if (offset + plan.endTime > target.duration) {
-                    result.warnings.push("目標合成長度不足，最後一輪會在合成結束後才停（需要 " +
+                    result.warnings.push("目標合成長度不足，演出會在合成結束後才完成（需要 " +
                         (Math.round((offset + plan.endTime) * 100) / 100) + " 秒）");
                 }
             }
@@ -402,16 +640,20 @@
             boardComp.motionBlur = !!cfg.spin.motionBlur;
 
             // 由最後一輪往前加，時間軸上 R1 會在最上面
+            var endLayers = [];
             for (i = plan.reels.length - 1; i >= 0; i--) {
                 var rp = plan.reels[i];
                 var rc = app.project.items.addComp(boardComp.name + "_R" + (rp.index + 1),
                     plan.reelW, plan.reelH, 1, duration, fps);
                 rc.parentFolder = folder;
-                buildReel(rc, rp, cfg, map, folder);
+                endLayers[rp.index] = buildReel(rc, rp, cfg, map, folder);
                 var rl = boardComp.layers.add(rc);
                 rl.name = "Reel " + (rp.index + 1);
-                rl.transform.position.setValue([rp.x, plan.boardH / 2]);
+                rl.transform.position.setValue([rp.x, plan.margin + plan.reelH / 2]);
             }
+            for (i = 0; i < plan.frames.length; i++) { buildFrame(boardComp, plan.frames[i], cfg, plan, frameAsset); }
+            for (i = 0; i < plan.lines.length; i++) { buildLine(boardComp, plan.lines[i], cfg, plan, cellAsset); }
+            addPulses(plan, endLayers, cfg.lineStyle.pulse);
 
             if (!boardLayer) {
                 boardLayer = target.layers.add(boardComp);
