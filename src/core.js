@@ -6,7 +6,7 @@
 var SFS = SFS || {};
 
 (function (S) {
-    S.VERSION = "1.1.0";
+    S.VERSION = "1.2.0";
     S.NAME = "SlotFakeSpin";
     S.TAG = "SFS_BOARD";
 

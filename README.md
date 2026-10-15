@@ -109,6 +109,22 @@ L1                                         111111111111111111
 - `ae` 需要 AE 已開啟專案；找不到 AE 時設定環境變數 `SFS_AE`（Windows：`AfterFX.exe` 完整路徑；macOS：App 名稱，例如 `Adobe After Effects 2025`）。
 - 也可以在 AE 用 **檔案 → 指令碼 → 執行指令碼檔案** 執行 [`dist/SlotFakeSpin_apply.jsx`](dist/SlotFakeSpin_apply.jsx)，選一個設定檔直接建立。
 
+### 沒有 AE：用 EffectCraft 預覽
+
+[EffectCraft](https://getartcraft.com/apps/effectcraft) 是開源的 AE 相容合成器，有命令列 `effectcraft-cli`。`ec` 指令用它在 `.ecproj` 專案裡建出跟 AE 一樣的盤面（同一份套用腳本，轉輪關鍵影格與 AE 一致），再算出檢查畫面和影片：
+
+```
+node tools/sfs.js ec work/spicy/preset.json --project work/spicy/MG.ecproj --comp MG --pos 540,1434 --render work/spicy/preview.mp4
+```
+
+- `--project` 不存在時會建立新專案（盤面放進新的 `SFS_Main_01` 合成）；存在時預設改寫原檔（原檔備份到執行資料夾的 `before.ecproj`），`--save-as` 另存新檔。
+- `--mode auto|new|update`、`--board` 和 `ae` 相同；`--pos x,y` 指定盤面在目標合成的位置（預設放中央，更新時不動）。
+- 回報實際的盤面合成名稱、標記，檢查畫面（`render-frame`）放在 `--out` 資料夾的 `frames/`；`--render` 依副檔名輸出 mp4 / mov / webm / gif，預設 0 秒到演出結束後 0.6 秒（`--range` 可改）。
+- 符號圖（和自訂繞框 / 中獎格素材）要在專案資料夾內；不在時會列出檔案，加 `--copy-assets` 自動複製到 `<專案資料夾>/sfs_assets/`。
+- 找不到 EffectCraft 時設定環境變數 `SFS_EC` 為 `effectcraft-cli` 的完整路徑（Windows 預設找 `%LOCALAPPDATA%\Programs\ArtCraft\effectcraft-*\effectcraft-cli.exe`）。
+
+EffectCraft 0.3.1 跟 AE 的差異都已處理（見 [cli.md](.claude/skills/slot-fake-spin/reference/cli.md)「EffectCraft 已知限制」）；預覽以 EffectCraft 算圖為準，交付前仍建議在 AE 跑一次。
+
 ![關鍵畫面](docs/keys.png)
 
 ## 產生的內容
@@ -148,10 +164,11 @@ src/ae.js        AE DOM：匯入、建立合成 / 圖層 / 形狀 / 關鍵影格
 src/ui.js        ScriptUI 面板
 src/main.js      面板進入點
 src/apply.js     自動化進入點（讀設定檔建立，給 tools/sfs.js 用）
-tools/build.js   建置 dist/（ES3 文法檢查、移除註解、非 ASCII 轉 \uXXXX）
+tools/build.js   建置 dist/（ES3 文法檢查、禁用 EffectCraft 沒有的 substr、移除註解、非 ASCII 轉 \uXXXX）
 tools/sfs.js     命令列（agent 用）
+tools/ec.js      EffectCraft 後端（sfs.js ec）
 tools/render.py  預覽繪製（Pillow）
-test/            模擬 AE（含形狀圖層、「新增屬性後舊參照失效」行為）與 ScriptUI 的測試
+test/            模擬 AE（含形狀圖層、「新增屬性後舊參照失效」行為、EffectCraft 模式）、ScriptUI 與假 effectcraft-cli 的測試
 .claude/         slot-fake-spin skill 與 slot-anticipation-director agent
 ```
 
@@ -171,3 +188,4 @@ npm run build   # 只建置 dist/
 - 每一格是一個圖層，超大盤面或很長的轉動時間建立時會比較久。
 - 不支援跨格的大符號（例如 2×2 巨型符號）。
 - `ae` 輸出檢查畫面用的是 AE 未公開但長期存在的 `saveFrameToPng`；沒有的版本會略過畫面、照常建立。
+- `ec`（EffectCraft）的限制見 [cli.md](.claude/skills/slot-fake-spin/reference/cli.md)「EffectCraft 已知限制」。
