@@ -147,9 +147,9 @@ var SFS = SFS || {};
             if (c === "{") { return obj(); }
             if (c === "[") { return arr(); }
             if (c === "\"") { return string(); }
-            if (c === "t" && s.substr(i, 4) === "true") { i += 4; return true; }
-            if (c === "f" && s.substr(i, 5) === "false") { i += 5; return false; }
-            if (c === "n" && s.substr(i, 4) === "null") { i += 4; return null; }
+            if (c === "t" && s.substring(i, i + 4) === "true") { i += 4; return true; }
+            if (c === "f" && s.substring(i, i + 5) === "false") { i += 5; return false; }
+            if (c === "n" && s.substring(i, i + 4) === "null") { i += 4; return null; }
             return num();
         }
         function num() {
@@ -172,7 +172,7 @@ var SFS = SFS || {};
                     else if (e === "b") { out += "\b"; }
                     else if (e === "f") { out += "\f"; }
                     else if (e === "u") {
-                        var hex = s.substr(i, 4);
+                        var hex = s.substring(i, i + 4);
                         if (!/^[0-9a-fA-F]{4}$/.test(hex)) { fail("bad unicode escape"); }
                         out += String.fromCharCode(parseInt(hex, 16));
                         i += 4;
