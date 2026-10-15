@@ -7,14 +7,16 @@
  *     board: 盤面合成名稱（可省略）, result: 結果 JSON 路徑, frames: "auto"|"none"|[秒...], framesDir: 輸出資料夾 }
  * 直接從「檔案 > 指令碼 > 執行指令碼檔案」執行時，會跳出對話框選設定檔。
  */
+var T = SFS.t;
 var job = null;
 try { job = $.global.SFS_APPLY || null; $.global.SFS_APPLY = null; } catch (e0) { job = null; }
+SFS.ae.initLang(job && job.lang);
 var interactive = !job;
 var result = { ok: false, version: SFS.VERSION, errors: [], warnings: [], frames: [] };
 
 function readText(path) {
     var f = new File(path);
-    if (!f.exists) { throw new Error("找不到設定檔：" + path); }
+    if (!f.exists) { throw new Error(T("找不到設定檔：{0}", path)); }
     f.encoding = "UTF-8";
     f.open("r");
     var t = f.read();
@@ -64,18 +66,18 @@ function autoShots(plan, offset) {
 
 try {
     if (interactive) {
-        var pf = File.openDialog("選擇 SlotFakeSpin 設定檔（.json）");
-        if (!pf) { throw new Error("已取消"); }
+        var pf = File.openDialog(T("選擇 SlotFakeSpin 設定檔（.json）"));
+        if (!pf) { throw new Error(T("已取消")); }
         job = { preset: pf.fsName, mode: "auto" };
     }
     var cfg = SFS.absolutizePaths(SFS.normalizeConfig(SFS.json.parse(readText(job.preset))), new File(job.preset).parent.fsName);
     var target = job.comp ? SFS.ae.findComp(job.comp) : SFS.ae.activeComp();
-    if (job.comp && !target) { throw new Error("找不到合成「" + job.comp + "」"); }
+    if (job.comp && !target) { throw new Error(T("找不到合成「{0}」", job.comp)); }
     var mode = job.mode || "auto";
     var boardLayer = null;
     if (target && mode !== "new") {
         boardLayer = SFS.ae.findBoardLayer(target, job.board || "");
-        if (mode === "update" && !boardLayer) { throw new Error("在合成「" + target.name + "」裡找不到要更新的盤面圖層"); }
+        if (mode === "update" && !boardLayer) { throw new Error(T("在合成「{0}」裡找不到要更新的盤面圖層", target.name)); }
     }
     var res = SFS.ae.build(cfg, boardLayer ? { boardLayer: boardLayer } : { targetComp: target });
     result.errors = res.errors;
@@ -107,15 +109,14 @@ try {
         }
     }
 } catch (err) {
-    result.errors.push(err.toString() + (err.line ? "（line " + err.line + "）" : ""));
+    result.errors.push(err.toString() + (err.line ? T("（line {0}）", err.line) : ""));
 }
 
 writeResult();
 if (interactive) {
     if (result.ok) {
-        alert("SlotFakeSpin：完成 " + result.board + "（全部停妥 " + (Math.round(result.allSettled * 100) / 100) + " 秒）" +
-            (result.warnings.length ? "\n" + result.warnings.join("\n") : ""), "SlotFakeSpin");
-    } else if (result.errors.join("") !== "Error: 已取消") {
+        alert(T("SlotFakeSpin：完成 {0}（全部停妥 {1} 秒）{2}", result.board, Math.round(result.allSettled * 100) / 100, result.warnings.length ? "\n" + result.warnings.join("\n") : ""), "SlotFakeSpin");
+    } else if (result.errors.join("") !== T("Error: 已取消")) {
         alert(result.errors.join("\n"), "SlotFakeSpin");
     }
 }

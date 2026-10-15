@@ -3,13 +3,38 @@
  * 所有 After Effects DOM 操作：匯入符號、建立轉輪合成、寫入關鍵影格、讀回設定。
  */
 (function (S) {
-    var U = S.util;
+    var U = S.util, T = S.t;
     var A = S.ae = {};
 
     A.ROOT_FOLDER = "SlotFakeSpin";
     A.SYMBOL_FOLDER = "SFS_Symbols";
     A.IMAGE_RE = /\.(png|jpe?g|psd|tga|tiff?|gif|bmp|ai|eps|exr|dpx|webp)$/i;
     A.MARKER_PREFIX = "SFS ";
+    A.SETTINGS_SECTION = "SlotFakeSpin";
+    A.LANG_KEY = "language";
+
+    // ------------------------------------------------------------------
+    // 介面語言（存在 AE 偏好設定：auto / zh / en）
+    // ------------------------------------------------------------------
+    A.langPref = function () {
+        try {
+            if (app.settings.haveSetting(A.SETTINGS_SECTION, A.LANG_KEY)) {
+                var v = app.settings.getSetting(A.SETTINGS_SECTION, A.LANG_KEY);
+                if (U.indexOf(S.LANGS, v) >= 0) { return v; }
+            }
+        } catch (e) { /* ignore */ }
+        return "auto";
+    };
+
+    A.setLangPref = function (v) {
+        try { app.settings.saveSetting(A.SETTINGS_SECTION, A.LANG_KEY, v); } catch (e) { /* ignore */ }
+    };
+
+    // override：工作參數指定的語言（zh / en），沒有就用偏好設定
+    A.initLang = function (override) {
+        S.lang = S.detectLang(override === "zh" || override === "en" ? override : A.langPref());
+        return S.lang;
+    };
 
     // ------------------------------------------------------------------
     // 專案項目工具
@@ -575,7 +600,7 @@
     // 把合成的某幾個時間點輸出成 PNG（給 agent 檢查畫面用）。saveFrameToPng 是 AE 未公開但長期存在的 API。
     A.exportFrames = function (comp, shots, folder) {
         var out = [];
-        if (!comp.saveFrameToPng) { return { files: out, error: "這個版本的 AE 沒有 saveFrameToPng" }; }
+        if (!comp.saveFrameToPng) { return { files: out, error: T("這個版本的 AE 沒有 saveFrameToPng") }; }
         if (!folder.exists) { folder.create(); }
         for (var i = 0; i < shots.length; i++) {
             var f = new File(folder.fsName + "/" + U.pad(i + 1, 2) + "_" + String(shots[i].label).replace(/[^\w\-]+/g, "_") + ".png");
@@ -621,7 +646,7 @@
 
         result.errors = S.validateConfig(cfg);
         if (result.errors.length) { return result; }
-        if (!app.project) { result.errors.push("沒有開啟的專案"); return result; }
+        if (!app.project) { result.errors.push(T("沒有開啟的專案")); return result; }
 
         var update = !!options.boardLayer;
         var boardLayer = update ? options.boardLayer : null;
@@ -630,11 +655,11 @@
             (options.targetComp || (L.target === "new" ? null : A.activeComp()));
         var offset = update ? boardLayer.startTime : 0;
         if (!update && !options.targetComp && L.target !== "new" && !target) {
-            result.errors.push("請先開啟一個合成（或在「設定」把輸出改成「新建合成」）");
+            result.errors.push(T("請先開啟一個合成（或在「設定」把輸出改成「新建合成」）"));
             return result;
         }
         if (cfg.spin.startTime - offset < 0) {
-            result.errors.push("開始時間早於盤面圖層的起點，請調整開始時間或圖層位置");
+            result.errors.push(T("開始時間早於盤面圖層的起點，請調整開始時間或圖層位置"));
             return result;
         }
 
@@ -643,7 +668,7 @@
         if (plan.errors.length) { result.errors = plan.errors; return result; }
         result.warnings = result.warnings.concat(plan.warnings);
 
-        app.beginUndoGroup(update ? "SlotFakeSpin 更新盤面" : "SlotFakeSpin 建立假轉");
+        app.beginUndoGroup(update ? T("SlotFakeSpin 更新盤面") : T("SlotFakeSpin 建立假轉"));
         try {
             // 符號與自訂素材
             var map = {}, missing = [], i;
@@ -652,17 +677,17 @@
                 if (it) { map[cfg.symbols[i].name] = it; } else { missing.push(cfg.symbols[i].name); }
             }
             if (missing.length) {
-                result.errors.push("找不到這些符號的素材：" + missing.join(", ") + "（請重新匯入或從符號庫移除）");
+                result.errors.push(T("找不到這些符號的素材：{0}（請重新匯入或從符號庫移除）", missing.join(", ")));
                 return result;
             }
             var frameAsset = null, cellAsset = null;
             if (cfg.frame.source === "custom" && plan.frames.length) {
                 frameAsset = resolveAsset(cfg.frame, "itemId", "itemName", "path");
-                if (!frameAsset) { result.errors.push("找不到繞框素材「" + cfg.frame.itemName + "」，請在「演出」重新指定"); return result; }
+                if (!frameAsset) { result.errors.push(T("找不到繞框素材「{0}」，請在「繞框」重新指定", cfg.frame.itemName)); return result; }
             }
             if (cfg.lineStyle.cellSource === "custom" && plan.lines.length) {
                 cellAsset = resolveAsset(cfg.lineStyle, "cellItemId", "cellItemName", "cellPath");
-                if (!cellAsset) { result.errors.push("找不到中獎格素材「" + cfg.lineStyle.cellItemName + "」，請在「演出」重新指定"); return result; }
+                if (!cellAsset) { result.errors.push(T("找不到中獎格素材「{0}」，請在「連線」重新指定", cfg.lineStyle.cellItemName)); return result; }
             }
 
             var root = A.ensureFolder(A.ROOT_FOLDER);
@@ -680,8 +705,7 @@
             } else {
                 duration = Math.max(target.duration - offset, need);
                 if (offset + plan.endTime > target.duration) {
-                    result.warnings.push("目標合成長度不足，演出會在合成結束後才完成（需要 " +
-                        (Math.round((offset + plan.endTime) * 100) / 100) + " 秒）");
+                    result.warnings.push(T("目標合成長度不足，演出會在合成結束後才完成（需要 {0} 秒）", Math.round((offset + plan.endTime) * 100) / 100));
                 }
             }
 
@@ -732,7 +756,7 @@
             try {
                 boardComp.comment = S.json.stringify({ sfs: S.VERSION, config: cfg });
             } catch (e) {
-                result.warnings.push("無法把設定寫入合成註解，之後將不能「讀取選取盤面」");
+                result.warnings.push(T("無法把設定寫入合成註解，之後將不能「讀取選取盤面」"));
             }
 
             if (result.createdTarget) {
@@ -744,7 +768,7 @@
             result.target = target;
             result.plan = plan;
         } catch (err) {
-            result.errors.push("建立時發生錯誤：" + err.toString() + (err.line ? "（line " + err.line + "）" : ""));
+            result.errors.push(T("建立時發生錯誤：{0}{1}", err.toString(), err.line ? T("（line {0}）", err.line) : ""));
         } finally {
             app.endUndoGroup();
         }

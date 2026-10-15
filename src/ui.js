@@ -3,7 +3,7 @@
  * ScriptUI 面板（可停駐）：符號 / 盤面 / 節奏 / 各輪 / 繞框 / 連線 / 設定，以及建立、更新、讀取、存檔。
  */
 (function (S) {
-    var U = S.util, A = S.ae, LN = S.lines;
+    var U = S.util, A = S.ae, LN = S.lines, T = S.t;
     var UI = S.ui = {};
     var SEC = "SlotFakeSpin", KEY_CFG = "lastConfig_v2", KEY_THUMB = "thumbs";
     var IS_MAC = (typeof $ !== "undefined" && $.os && $.os.indexOf("Mac") >= 0);
@@ -52,7 +52,8 @@
         } catch (e) { return null; }
     }
 
-    UI.create = function (thisObj) {
+    UI.create = function (thisObj, opts) {
+        opts = opts || {};
         var st = {
             cfg: UI.loadLast() || S.defaultConfig(),
             editing: "start",
@@ -97,10 +98,23 @@
             return p;
         }
 
+        // 文字實際寬度（量不到就用字數估）
+        function textWidth(ctrl, text) {
+            try {
+                var sz = ctrl.graphics.measureString(text);
+                if (sz && sz[0] > 0) { return Math.ceil(sz[0]); }
+            } catch (e) { /* ignore */ }
+            return String(text).length * 7;
+        }
+
+        // 版面寬度是照中文排的；其他語言文字比較長時自動撐開
+        function fitWidth(ctrl, text, width, pad) {
+            ctrl.preferredSize.width = S.lang === "zh" ? width : Math.max(width, textWidth(ctrl, text) + (pad || 6));
+            return ctrl;
+        }
+
         function label(parent, text, width) {
-            var t = parent.add("statictext", undefined, text);
-            t.preferredSize.width = width || 56;
-            return t;
+            return fitWidth(parent.add("statictext", undefined, text), text, width || 56);
         }
 
         function hint(parent, text) {
@@ -185,9 +199,9 @@
             if (text) { label(parent, text, opts.labelWidth); }
             var et = parent.add("edittext", undefined, String(holder()[key]));
             et.characters = 7;
-            et.helpTip = "#RRGGBB" + (opts.allowEmpty ? "；空白 = 自動配色" : "");
-            var btn = parent.add("button", undefined, "選色");
-            btn.preferredSize.width = 44;
+            et.helpTip = "#RRGGBB" + (opts.allowEmpty ? T("；空白 = 自動配色") : "");
+            var btn = parent.add("button", undefined, T("選色"));
+            fitWidth(btn, btn.text, 44, 16);
             function apply(v) {
                 v = U.trim(v).toUpperCase();
                 if (v !== "" && v.charAt(0) !== "#") { v = "#" + v; }
@@ -260,7 +274,7 @@
 
         function curveLabel(k) {
             var i = U.indexOf(S.CURVE_KEYS, k);
-            return i >= 0 ? S.CURVE_LABELS[i] : k;
+            return i >= 0 ? T(S.CURVE_LABELS[i]) : k;
         }
 
         function currentFps() {
@@ -337,7 +351,7 @@
                 var textPen = newPen(g, [0.85, 0.85, 0.85, 1]);
                 var plan = st.plan;
                 if (!plan || plan.errors.length || !plan.reels.length) {
-                    g.drawString(plan && plan.errors.length ? "⚠ " + plan.errors[0] : "（尚無節奏）", textPen, 6, 6, font);
+                    g.drawString(plan && plan.errors.length ? "⚠ " + plan.errors[0] : T("（尚無節奏）"), textPen, 6, 6, font);
                     return;
                 }
                 var n = plan.reels.length, hasLines = plan.lines.length > 0;
@@ -371,7 +385,7 @@
                 }
                 if (hasLines) {
                     var ly = top + n * rowH, stripe = Math.max(2, Math.floor((rowH - 2) / plan.lines.length));
-                    g.drawString("連線", textPen, 2, ly + (rowH - 12) / 2, font);
+                    g.drawString(T("連線"), textPen, 2, ly + (rowH - 12) / 2, font);
                     for (i = 0; i < plan.lines.length; i++) {
                         var pl = plan.lines[i], c = pl.color;
                         for (var k = 0; k < pl.shows.length; k++) {
@@ -387,7 +401,7 @@
             var tl = parent.add("group");
             tl.preferredSize = [340, 120];
             tl.onDraw = drawTimeline;
-            tl.helpTip = "藍 = 轉動、淺藍 = 減速、白線 = 停輪、灰 = 回彈、橘框 = 繞框、彩色 = 連線顯示";
+            tl.helpTip = T("藍 = 轉動、淺藍 = 減速、白線 = 停輪、灰 = 回彈、橘框 = 繞框、彩色 = 連線顯示");
             st.timelines.push(tl);
             return tl;
         }
@@ -395,13 +409,13 @@
         // ================= 版面骨架 =================
         var tabs = win.add("tabbedpanel");
         tabs.alignChildren = ["fill", "top"];
-        var tSym = tabs.add("tab", undefined, "符號");
-        var tBoard = tabs.add("tab", undefined, "盤面");
-        var tRhythm = tabs.add("tab", undefined, "節奏");
-        var tReels = tabs.add("tab", undefined, "各輪");
-        var tFrame = tabs.add("tab", undefined, "繞框");
-        var tLines = tabs.add("tab", undefined, "連線");
-        var tSet = tabs.add("tab", undefined, "設定");
+        var tSym = tabs.add("tab", undefined, T("符號"));
+        var tBoard = tabs.add("tab", undefined, T("盤面"));
+        var tRhythm = tabs.add("tab", undefined, T("節奏"));
+        var tReels = tabs.add("tab", undefined, T("各輪"));
+        var tFrame = tabs.add("tab", undefined, T("繞框"));
+        var tLines = tabs.add("tab", undefined, T("連線"));
+        var tSet = tabs.add("tab", undefined, T("設定"));
         var allTabs = [tSym, tBoard, tRhythm, tReels, tFrame, tLines, tSet];
         for (var ti = 0; ti < allTabs.length; ti++) {
             allTabs[ti].orientation = "column";
@@ -412,10 +426,10 @@
 
         // ================= 符號 =================
         var gSymBtns = row(tSym);
-        var btnImport = gSymBtns.add("button", undefined, "匯入資料夾…");
-        btnImport.helpTip = "選一個資料夾，裡面的 PNG / JPG / PSD 等圖檔都會變成符號（檔名 = 符號名稱）";
-        var btnAddSel = gSymBtns.add("button", undefined, "加入專案選取");
-        btnAddSel.helpTip = "把專案面板中選取的素材或合成（可做動態符號）加入符號庫";
+        var btnImport = gSymBtns.add("button", undefined, T("匯入資料夾…"));
+        btnImport.helpTip = T("選一個資料夾，裡面的 PNG / JPG / PSD 等圖檔都會變成符號（檔名 = 符號名稱）");
+        var btnAddSel = gSymBtns.add("button", undefined, T("加入專案選取"));
+        btnAddSel.helpTip = T("把專案面板中選取的素材或合成（可做動態符號）加入符號庫");
 
         var gSymList = row(tSym);
         gSymList.alignChildren = ["left", "top"];
@@ -432,33 +446,33 @@
         };
 
         var gSymOps = row(tSym);
-        var btnFiller = gSymOps.add("button", undefined, "切換填充");
-        btnFiller.helpTip = "● = 轉動中會隨機出現的填充符號；○ = 只會出現在你指定的盤面上（例如不想被亂數帶出來的 Scatter / Bonus）";
-        var btnRename = gSymOps.add("button", undefined, "改名");
-        var btnRemove = gSymOps.add("button", undefined, "移除");
-        var btnClear = gSymOps.add("button", undefined, "清空");
-        hint(tSym, "● 填充符號（轉動中隨機出現）  ○ 不當填充　雙擊可切換");
+        var btnFiller = gSymOps.add("button", undefined, T("切換填充"));
+        btnFiller.helpTip = T("● = 轉動中會隨機出現的填充符號；○ = 只會出現在你指定的盤面上（例如不想被亂數帶出來的 Scatter / Bonus）");
+        var btnRename = gSymOps.add("button", undefined, T("改名"));
+        var btnRemove = gSymOps.add("button", undefined, T("移除"));
+        var btnClear = gSymOps.add("button", undefined, T("清空"));
+        hint(tSym, T("● 填充符號（轉動中隨機出現）  ○ 不當填充　雙擊可切換"));
 
         // ================= 盤面 =================
         var gSize = row(tBoard);
-        label(gSize, "輪數", 30);
+        label(gSize, T("輪數"), 30);
         var etReels = gSize.add("edittext", undefined, String(st.cfg.layout.reels));
         etReels.characters = 3;
-        label(gSize, "列數", 30);
+        label(gSize, T("列數"), 30);
         var etRows = gSize.add("edittext", undefined, String(st.cfg.layout.rows));
         etRows.characters = 3;
-        var btnSize = gSize.add("button", undefined, "套用尺寸");
+        var btnSize = gSize.add("button", undefined, T("套用尺寸"));
 
         var gMode = row(tBoard);
-        var rbStart = gMode.add("radiobutton", undefined, "起始盤面");
-        var rbEnd = gMode.add("radiobutton", undefined, "結果盤面");
+        var rbStart = gMode.add("radiobutton", undefined, T("起始盤面"));
+        var rbEnd = gMode.add("radiobutton", undefined, T("結果盤面"));
         rbStart.value = true;
-        var cbThumbs = gMode.add("checkbox", undefined, "縮圖");
+        var cbThumbs = gMode.add("checkbox", undefined, T("縮圖"));
         cbThumbs.value = st.useThumbs;
-        cbThumbs.helpTip = "格子顯示符號縮圖（PNG / JPG）。如果畫面顯示異常可以關掉。";
+        cbThumbs.helpTip = T("格子顯示符號縮圖（PNG / JPG）。如果畫面顯示異常可以關掉。");
 
         var gBrush = row(tBoard);
-        label(gBrush, "畫筆", 30);
+        label(gBrush, T("畫筆"), 30);
         var ddBrush = gBrush.add("dropdownlist", undefined, []);
         ddBrush.preferredSize.width = 150;
 
@@ -469,69 +483,69 @@
         grid.margins = [0, 4, 0, 4];
 
         var gOps = row(tBoard);
-        var btnRandom = gOps.add("button", undefined, "隨機");
-        var btnFillAll = gOps.add("button", undefined, "全填畫筆");
-        var btnCopy = gOps.add("button", undefined, "複製到另一盤");
-        var btnSwap = gOps.add("button", undefined, "互換");
+        var btnRandom = gOps.add("button", undefined, T("隨機"));
+        var btnFillAll = gOps.add("button", undefined, T("全填畫筆"));
+        var btnCopy = gOps.add("button", undefined, T("複製到另一盤"));
+        var btnSwap = gOps.add("button", undefined, T("互換"));
         var gOps2 = row(tBoard);
-        var btnText = gOps2.add("button", undefined, "文字編輯…");
-        btnText.helpTip = "用文字輸入盤面，可直接從 Excel / Google 試算表貼上";
-        hint(tBoard, "點格子 = 填入畫筆　Alt+點 = 吸取符號　Shift+點 = 整輪填入");
+        var btnText = gOps2.add("button", undefined, T("文字編輯…"));
+        btnText.helpTip = T("用文字輸入盤面，可直接從 Excel / Google 試算表貼上");
+        hint(tBoard, T("點格子 = 填入畫筆　Alt+點 = 吸取符號　Shift+點 = 整輪填入"));
 
         // ================= 節奏（快速產生） =================
         function regen() {
             if (st.cfg.spin.autoRhythm) { st.cfg.reels = S.generateReels(st.cfg); refreshReelList(); }
         }
         var rr1 = row(tRhythm);
-        var etStart = numField(rr1, "開始時間", "spin", "startTime", "秒", { min: 0, tip: "開始轉動的時間（目標合成的時間）。各輪的時間都從這裡起算" });
-        var btnCTI = rr1.add("button", undefined, "取目前時間");
+        var etStart = numField(rr1, T("開始時間"), "spin", "startTime", T("秒"), { min: 0, tip: T("開始轉動的時間（目標合成的時間）。各輪的時間都從這裡起算") });
+        var btnCTI = rr1.add("button", undefined, T("取目前時間"));
         var rr2 = row(tRhythm);
-        textField(rr2, "起轉順序", "spin", "startOrder", { chars: 11, after: regen, tip: "空白 = 1,2,3…。例：1,2,3,4,5 依序起轉；1+2+3+4+5 同時起轉" });
-        numField(rr2, "間隔", "spin", "startStagger", "秒", { min: 0, labelWidth: 30, after: regen });
+        textField(rr2, T("起轉順序"), "spin", "startOrder", { chars: 11, after: regen, tip: T("空白 = 1,2,3…。例：1,2,3,4,5 依序起轉；1+2+3+4+5 同時起轉") });
+        numField(rr2, T("間隔"), "spin", "startStagger", T("秒"), { min: 0, labelWidth: 30, after: regen });
         var rr3 = row(tRhythm);
-        textField(rr3, "停輪順序", "spin", "stopOrder", {
+        textField(rr3, T("停輪順序"), "spin", "stopOrder", {
             chars: 11, after: regen,
-            tip: "逗號 = 先後，+ = 同時停。\n例：1,2,3,4,5（左到右）、5,4,3,2,1（右到左）、1+2+3,4,5（前三輪一起停）、3,2,4,1,5（從中間往外）"
+            tip: T("逗號 = 先後，+ = 同時停。\n例：1,2,3,4,5（左到右）、5,4,3,2,1（右到左）、1+2+3,4,5（前三輪一起停）、3,2,4,1,5（從中間往外）")
         });
         var rr4 = row(tRhythm);
-        numField(rr4, "第一次停", "spin", "firstStop", "秒", { min: 0.05, after: regen, tip: "從開始到第一次停輪（停輪 = 衝到最遠點那一刻，可對齊音效）" });
-        numField(rr4, "每次間隔", "spin", "stagger", "秒", { min: 0, labelWidth: 52, after: regen });
+        numField(rr4, T("第一次停"), "spin", "firstStop", T("秒"), { min: 0.05, after: regen, tip: T("從開始到第一次停輪（停輪 = 衝到最遠點那一刻，可對齊音效）") });
+        numField(rr4, T("每次間隔"), "spin", "stagger", T("秒"), { min: 0, labelWidth: 52, after: regen });
         var rr5 = row(tRhythm);
-        textField(rr5, "轉速", "spin", "speeds", {
+        textField(rr5, T("轉速"), "spin", "speeds", {
             chars: 14, after: regen,
-            tip: "格/秒。一個數字 = 全部一樣；列表 = 依停輪順序，例如 18,18,20,24,28（越後面停的轉越快）"
+            tip: T("格/秒。一個數字 = 全部一樣；列表 = 依停輪順序，例如 18,18,20,24,28（越後面停的轉越快）")
         });
-        rr5.add("statictext", undefined, "格/秒");
+        rr5.add("statictext", undefined, T("格/秒"));
         var rr6 = row(tRhythm);
-        numField(rr6, "減速", "spin", "decelTime", "秒", { min: 0, after: regen, tip: "停輪前的減速時間，越短停得越乾脆" });
-        dropField(rr6, "", "spin", "decelCurve", S.CURVE_KEYS, S.CURVE_LABELS, { after: regen });
+        numField(rr6, T("減速"), "spin", "decelTime", T("秒"), { min: 0, after: regen, tip: T("停輪前的減速時間，越短停得越乾脆") });
+        dropField(rr6, "", "spin", "decelCurve", S.CURVE_KEYS, S.tList(S.CURVE_LABELS), { after: regen });
         var rr7 = row(tRhythm);
-        numField(rr7, "停輪衝過", "spin", "overshoot", "格", { min: 0, after: regen, tip: "停輪時衝過定位的距離（0 = 不回彈）" });
-        numField(rr7, "回彈", "spin", "bounceTime", "秒", { min: 0, labelWidth: 30, after: regen });
-        var pAnt = section(tRhythm, "期待（會繞框）");
+        numField(rr7, T("停輪衝過"), "spin", "overshoot", T("格"), { min: 0, after: regen, tip: T("停輪時衝過定位的距離（0 = 不回彈）") });
+        numField(rr7, T("回彈"), "spin", "bounceTime", T("秒"), { min: 0, labelWidth: 30, after: regen });
+        var pAnt = section(tRhythm, T("期待（會繞框）"));
         var ra1 = row(pAnt);
-        textField(ra1, "期待輪", "spin", "antReels", { chars: 7, after: regen, tip: "例如 4,5：第 4、5 輪會延長轉動並繞框（聽牌）" });
-        numField(ra1, "每輪多轉", "spin", "antTime", "秒", { min: 0, labelWidth: 52, after: regen, tip: "會往後累加：第 4 輪多 0.8、第 5 輪再多 0.8" });
+        textField(ra1, T("期待輪"), "spin", "antReels", { chars: 7, after: regen, tip: T("例如 4,5：第 4、5 輪會延長轉動並繞框（聽牌）") });
+        numField(ra1, T("每輪多轉"), "spin", "antTime", T("秒"), { min: 0, labelWidth: 52, after: regen, tip: T("會往後累加：第 4 輪多 0.8、第 5 輪再多 0.8") });
         var ra2 = row(pAnt);
-        numField(ra2, "繞框轉速", "spin", "antSpeed", "格/秒", { min: 0, after: regen, tip: "繞框開始後切換到的轉速，0 = 不變" });
+        numField(ra2, T("繞框轉速"), "spin", "antSpeed", T("格/秒"), { min: 0, after: regen, tip: T("繞框開始後切換到的轉速，0 = 不變") });
         var ra3 = row(pAnt);
-        numField(ra3, "期待減速", "spin", "antDecelTime", "秒", { min: 0, after: regen });
-        dropField(ra3, "", "spin", "antCurve", S.CURVE_KEYS, S.CURVE_LABELS, { after: regen });
-        var pSug = section(tRhythm, "期待感建議（依結果盤面自動判斷期待輪）");
+        numField(ra3, T("期待減速"), "spin", "antDecelTime", T("秒"), { min: 0, after: regen });
+        dropField(ra3, "", "spin", "antCurve", S.CURVE_KEYS, S.tList(S.CURVE_LABELS), { after: regen });
+        var pSug = section(tRhythm, T("期待感建議（依結果盤面自動判斷期待輪）"));
         var rs1 = row(pSug);
-        textField(rs1, "觸發符號", "antRule", "symbols", { chars: 9, tip: "Scatter / Bonus 等觸發型符號，逗號分隔" });
-        numField(rs1, "", "antRule", "count", "顆觸發", { min: 2, integer: true, chars: 2 });
-        checkField(rs1, "達標後續追", "antRule", "after", { tip: "已經觸發後，後面的輪還是期待（追第 4、5 顆）" });
+        textField(rs1, T("觸發符號"), "antRule", "symbols", { chars: 9, tip: T("Scatter / Bonus 等觸發型符號，逗號分隔") });
+        numField(rs1, "", "antRule", "count", T("顆觸發"), { min: 2, integer: true, chars: 2 });
+        checkField(rs1, T("達標後續追"), "antRule", "after", { tip: T("已經觸發後，後面的輪還是期待（追第 4、5 顆）") });
         var rs2 = row(pSug);
-        textField(rs2, "聽牌符號", "antRule", "tease", { chars: 9, tip: "大獎符號（例如 SEVEN）：同一條線從第 1 輪連到第 N 輪時，下一輪期待。空白 = 不判斷" });
-        numField(rs2, "連", "antRule", "teaseMin", "輪後", { min: 1, integer: true, chars: 2, labelWidth: 20 });
-        var btnSuggest = rs2.add("button", undefined, "期待感建議");
-        btnSuggest.helpTip = "依「結果盤面」和「停輪順序」模擬玩家看到的過程，算出哪幾輪要期待，並重新產生各輪";
+        textField(rs2, T("聽牌符號"), "antRule", "tease", { chars: 9, tip: T("大獎符號（例如 SEVEN）：同一條線從第 1 輪連到第 N 輪時，下一輪期待。空白 = 不判斷") });
+        numField(rs2, T("tease\u0004連"), "antRule", "teaseMin", T("輪後"), { min: 1, integer: true, chars: 2, labelWidth: 20 });
+        var btnSuggest = rs2.add("button", undefined, T("期待感建議"));
+        btnSuggest.helpTip = T("依「結果盤面」和「停輪順序」模擬玩家看到的過程，算出哪幾輪要期待，並重新產生各輪");
         var rr8 = row(tRhythm);
-        var cbAuto = checkField(rr8, "自動套用到各輪", "spin", "autoRhythm", {
-            after: regen, tip: "勾選時，改上面的參數會立刻重新產生「各輪」表格。手動改過各輪後會自動取消勾選。"
+        var cbAuto = checkField(rr8, T("自動套用到各輪"), "spin", "autoRhythm", {
+            after: regen, tip: T("勾選時，改上面的參數會立刻重新產生「各輪」表格。手動改過各輪後會自動取消勾選。")
         });
-        var btnApplyRhythm = rr8.add("button", undefined, "套用節奏");
+        var btnApplyRhythm = rr8.add("button", undefined, T("套用節奏"));
         addTimeline(tRhythm);
         var info = tRhythm.add("statictext", undefined, "", { multiline: true });
         info.preferredSize = [340, 44];
@@ -539,153 +553,167 @@
         // ================= 各輪 =================
         var reelList = tReels.add("listbox", undefined, [], {
             multiselect: true, numberOfColumns: 8, showHeaders: true,
-            columnTitles: ["輪", "起轉", "停輪", "轉速", "減速", "衝過", "回彈", "繞框"],
-            columnWidths: [30, 40, 40, 40, 70, 36, 36, 60]
+            columnTitles: [T("輪"), T("起轉"), T("停輪"), T("轉速"), T("減速"), T("衝過"), T("回彈"), T("繞框")],
+            columnWidths: S.lang === "zh" ? [30, 40, 40, 40, 70, 36, 36, 60] : [30, 38, 38, 42, 70, 34, 44, 56]
         });
         reelList.preferredSize = [356, 130];
         var re1 = row(tReels);
-        reelField(re1, "起轉", "start", "秒", { min: 0 });
-        reelField(re1, "停輪", "stop", "秒", { min: 0.05, labelWidth: 30 });
+        reelField(re1, T("起轉"), "start", T("秒"), { min: 0 });
+        reelField(re1, T("停輪"), "stop", T("秒"), { min: 0.05, labelWidth: 30 });
         var re2 = row(tReels);
-        reelField(re2, "轉速", "speed", "格/秒", { min: 0.1 });
+        reelField(re2, T("轉速"), "speed", T("格/秒"), { min: 0.1 });
         var re3 = row(tReels);
-        reelField(re3, "減速", "decelTime", "秒", { min: 0 });
-        var ddReelCurve = re3.add("dropdownlist", undefined, S.CURVE_LABELS);
+        reelField(re3, T("減速"), "decelTime", T("秒"), { min: 0 });
+        var ddReelCurve = re3.add("dropdownlist", undefined, S.tList(S.CURVE_LABELS));
         ddReelCurve.selection = 0;
         var re4 = row(tReels);
-        reelField(re4, "停輪衝過", "overshoot", "格", { min: 0 });
-        reelField(re4, "回彈", "bounceTime", "秒", { min: 0, labelWidth: 30 });
+        reelField(re4, T("停輪衝過"), "overshoot", T("格"), { min: 0 });
+        reelField(re4, T("回彈"), "bounceTime", T("秒"), { min: 0, labelWidth: 30 });
         var re5 = row(tReels);
-        var cbReelFrame = re5.add("checkbox", undefined, "繞框");
-        reelField(re5, "開始", "frameStart", "秒", { min: 0, labelWidth: 30 });
-        reelField(re5, "轉速", "frameSpeed", "", { min: 0, labelWidth: 30, tip: "繞框開始後切換到的轉速（格/秒），0 = 不變" });
+        var cbReelFrame = re5.add("checkbox", undefined, T("繞框"));
+        reelField(re5, T("開始"), "frameStart", T("秒"), { min: 0, labelWidth: 30 });
+        reelField(re5, T("轉速"), "frameSpeed", "", { min: 0, labelWidth: 30, tip: T("繞框開始後切換到的轉速（格/秒），0 = 不變") });
         var re6 = row(tReels);
-        var btnSelAll = re6.add("button", undefined, "全選");
-        var btnShift = re6.add("button", undefined, "整體平移…");
-        btnShift.helpTip = "把選取輪的起轉 / 停輪 / 繞框時間一起往前或往後移";
-        hint(tReels, "時間都從「開始時間」算起（秒）。可多選一起改。");
+        var btnSelAll = re6.add("button", undefined, T("全選"));
+        var btnShift = re6.add("button", undefined, T("整體平移…"));
+        btnShift.helpTip = T("把選取輪的起轉 / 停輪 / 繞框時間一起往前或往後移");
+        hint(tReels, T("時間都從「開始時間」算起（秒）。可多選一起改。"));
         addTimeline(tReels);
 
         // ================= 繞框 =================
         var fr1 = row(tFrame);
-        var ddFrameSrc = dropField(fr1, "素材", "frame", "source", ["builtin", "custom"], ["內建跑燈框", "自訂素材"]);
-        var btnFrameAsset = fr1.add("button", undefined, "指定選取");
-        btnFrameAsset.helpTip = "在專案面板選一個素材或合成（你自己的繞框動畫），按這裡指定";
+        var ddFrameSrc = dropField(fr1, T("素材"), "frame", "source", ["builtin", "custom"], [T("內建跑燈框"), T("自訂素材")]);
+        var btnFrameAsset = fr1.add("button", undefined, T("指定選取"));
+        btnFrameAsset.helpTip = T("在專案面板選一個素材或合成（你自己的繞框動畫），按這裡指定");
         var stFrameAsset = tFrame.add("statictext", undefined, "");
         stFrameAsset.preferredSize.width = 330;
         var fr2 = row(tFrame);
-        colorField(fr2, "顏色", function () { return st.cfg.frame; }, "color");
-        numField(fr2, "線寬", "frame", "width", "px", { min: 1, labelWidth: 30 });
+        colorField(fr2, T("顏色"), function () { return st.cfg.frame; }, "color");
+        numField(fr2, T("線寬"), "frame", "width", "px", { min: 1, labelWidth: 30 });
         var fr3 = row(tFrame);
-        numField(fr3, "外擴", "frame", "pad", "px", { min: -100, tip: "框比轉輪大多少（每邊）" });
-        numField(fr3, "跑燈", "frame", "laps", "圈/秒", { min: 0, labelWidth: 30 });
+        numField(fr3, T("外擴"), "frame", "pad", "px", { min: -100, tip: T("框比轉輪大多少（每邊）") });
+        numField(fr3, T("跑燈"), "frame", "laps", T("圈/秒"), { min: 0, labelWidth: 30 });
         var fr4 = row(tFrame);
-        numField(fr4, "跑燈長度", "frame", "runner", "%", { min: 1, max: 100 });
-        checkField(fr4, "光暈", "frame", "glow");
+        numField(fr4, T("跑燈長度"), "frame", "runner", "%", { min: 1, max: 100 });
+        checkField(fr4, T("光暈"), "frame", "glow");
         var fr5 = row(tFrame);
-        numField(fr5, "淡入淡出", "frame", "fade", "秒", { min: 0 });
-        numField(fr5, "停後保留", "frame", "hold", "秒", { min: 0, labelWidth: 52 });
-        hint(tFrame, "哪幾輪要繞框、什麼時候開始：在「節奏」設定期待輪，或在「各輪」逐輪勾選「繞框」並設定開始時間。繞框會在該輪停妥後結束。");
+        numField(fr5, T("淡入淡出"), "frame", "fade", T("秒"), { min: 0 });
+        numField(fr5, T("停後保留"), "frame", "hold", T("秒"), { min: 0, labelWidth: 52 });
+        hint(tFrame, T("哪幾輪要繞框、什麼時候開始：在「節奏」設定期待輪，或在「各輪」逐輪勾選「繞框」並設定開始時間。繞框會在該輪停妥後結束。"));
 
         // ================= 連線 =================
         var ln1 = row(tLines);
-        var btnPaylines = ln1.add("button", undefined, "線型表…");
-        btnPaylines.helpTip = "每行一條線，寫每輪第幾列（1 = 最上面），例如 2 2 2 2 2";
-        textField(ln1, "百搭", "lineSet", "wilds", { chars: 6, labelWidth: 30, tip: "可代替任何符號，逗號分隔" });
-        numField(ln1, "最少", "lineSet", "minCount", "連", { min: 1, integer: true, chars: 2, labelWidth: 30 });
+        var btnPaylines = ln1.add("button", undefined, T("線型表…"));
+        btnPaylines.helpTip = T("每行一條線，寫每輪第幾列（1 = 最上面），例如 2 2 2 2 2");
+        textField(ln1, T("百搭"), "lineSet", "wilds", { chars: 6, labelWidth: 30, tip: T("可代替任何符號，逗號分隔") });
+        numField(ln1, T("最少"), "lineSet", "minCount", T("min\u0004連"), { min: 1, integer: true, chars: 2, labelWidth: 30 });
         var ln1b = row(tLines);
-        textField(ln1b, "不算連線", "lineSet", "exclude", { chars: 12, tip: "這些符號不會算成連線（例如 SCATTER），逗號分隔" });
+        textField(ln1b, T("不算連線"), "lineSet", "exclude", { chars: 12, tip: T("這些符號不會算成連線（例如 SCATTER），逗號分隔") });
         var ln2 = row(tLines);
-        var btnDetect = ln2.add("button", undefined, "從結果盤面偵測");
-        var btnAddLine = ln2.add("button", undefined, "新增");
-        var btnDelLine = ln2.add("button", undefined, "刪除");
+        var btnDetect = ln2.add("button", undefined, T("從結果盤面偵測"));
+        var btnAddLine = ln2.add("button", undefined, T("新增"));
+        var btnDelLine = ln2.add("button", undefined, T("刪除"));
         var lineList = tLines.add("listbox", undefined, [], {
             multiselect: true, numberOfColumns: 4, showHeaders: true,
-            columnTitles: ["#", "線型", "連", "顯示（停妥後 開始+長度）"],
+            columnTitles: ["#", T("線型"), T("count\u0004連"), T("顯示（停妥後 開始+長度）")],
             columnWidths: [26, 84, 26, 200]
         });
         lineList.preferredSize = [356, 100];
         var le1 = row(tLines);
-        var etLinePattern = lineField(le1, "線型", "pattern", { chars: 12, tip: "每輪第幾列（1 = 最上面），例如 1,2,3,2,1。\n0 = 這輪不框：2,0,1,0,2 = 只框 3 顆 Scatter、不畫線" });
-        var etLineCount = lineField(le1, "連", "count", { chars: 2, labelWidth: 20, integer: true });
-        var cbBoxOnly = le1.add("checkbox", undefined, "只框");
-        cbBoxOnly.helpTip = "只框格子、不畫線（Scatter 這類不靠連線的中獎）";
+        var etLinePattern = lineField(le1, T("線型"), "pattern", { chars: 12, tip: T("每輪第幾列（1 = 最上面），例如 1,2,3,2,1。\n0 = 這輪不框：2,0,1,0,2 = 只框 3 顆 Scatter、不畫線") });
+        var etLineCount = lineField(le1, T("count\u0004連"), "count", { chars: 2, labelWidth: 20, integer: true });
+        var cbBoxOnly = le1.add("checkbox", undefined, T("只框"));
+        cbBoxOnly.helpTip = T("只框格子、不畫線（Scatter 這類不靠連線的中獎）");
         var le2 = row(tLines);
-        var etLineShows = lineField(le2, "顯示", "shows", { chars: 22, tip: "停妥後幾秒開始 + 顯示幾秒，可以多段：0.3+1.2, 2.5+0.9" });
+        var etLineShows = lineField(le2, T("顯示"), "shows", { chars: 22, tip: T("停妥後幾秒開始 + 顯示幾秒，可以多段：0.3+1.2, 2.5+0.9") });
         var le3 = row(tLines);
-        var lineColorEt = colorField(le3, "顏色", function () { return selectedLine() || { color: "" }; }, "color", {
+        var lineColorEt = colorField(le3, T("顏色"), function () { return selectedLine() || { color: "" }; }, "color", {
             allowEmpty: true, after: function () { refreshLineList(); }
         });
-        var pLineTime = section(tLines, "顯示時間");
+        var pLineTime = section(tLines, T("顯示時間"));
         var lt1 = row(pLineTime);
-        numField(lt1, "停妥後", "lineGen", "delay", "秒", { min: 0, labelWidth: 40 });
-        dropField(lt1, "", "lineGen", "mode", S.LINE_MODES, S.LINE_MODE_LABELS);
+        numField(lt1, T("停妥後"), "lineGen", "delay", T("秒"), { min: 0, labelWidth: 40 });
+        dropField(lt1, "", "lineGen", "mode", S.LINE_MODES, S.tList(S.LINE_MODE_LABELS));
         var lt2 = row(pLineTime);
-        numField(lt2, "全部", "lineGen", "allTime", "秒", { min: 0.05, labelWidth: 30 });
-        numField(lt2, "每條", "lineGen", "eachTime", "秒", { min: 0.05, labelWidth: 30 });
-        numField(lt2, "間隔", "lineGen", "gap", "", { min: 0, labelWidth: 30 });
-        var btnLineTiming = pLineTime.add("button", undefined, "套用到全部連線");
-        var pLineStyle = section(tLines, "樣式");
+        numField(lt2, T("全部"), "lineGen", "allTime", T("秒"), { min: 0.05, labelWidth: 30 });
+        numField(lt2, T("每條"), "lineGen", "eachTime", T("秒"), { min: 0.05, labelWidth: 30 });
+        numField(lt2, T("間隔"), "lineGen", "gap", "", { min: 0, labelWidth: 30 });
+        var btnLineTiming = pLineTime.add("button", undefined, T("套用到全部連線"));
+        var pLineStyle = section(tLines, T("樣式"));
         var ls1 = row(pLineStyle);
-        numField(ls1, "線寬", "lineStyle", "width", "px", { min: 1, labelWidth: 30 });
-        numField(ls1, "畫線", "lineStyle", "drawTime", "秒", { min: 0, labelWidth: 30 });
-        checkField(ls1, "畫滿", "lineStyle", "full", { tip: "勾選 = 線畫滿整個盤面；不勾 = 只畫中獎的那幾格" });
+        numField(ls1, T("線寬"), "lineStyle", "width", "px", { min: 1, labelWidth: 30 });
+        numField(ls1, T("畫線"), "lineStyle", "drawTime", T("秒"), { min: 0, labelWidth: 30 });
+        checkField(ls1, T("畫滿"), "lineStyle", "full", { tip: T("勾選 = 線畫滿整個盤面；不勾 = 只畫中獎的那幾格") });
         var ls2 = row(pLineStyle);
-        checkField(ls2, "中獎框", "lineStyle", "boxes");
-        numField(ls2, "框寬", "lineStyle", "boxWidth", "", { min: 1, labelWidth: 30, chars: 3 });
-        numField(ls2, "跳動", "lineStyle", "pulse", "%", { min: 100, labelWidth: 30, chars: 4, tip: "中獎符號放大到幾 %，100 = 不跳" });
-        checkField(ls2, "光暈", "lineStyle", "glow");
+        checkField(ls2, T("中獎框"), "lineStyle", "boxes");
+        numField(ls2, T("框寬"), "lineStyle", "boxWidth", "", { min: 1, labelWidth: 30, chars: 3 });
+        numField(ls2, T("跳動"), "lineStyle", "pulse", "%", { min: 100, labelWidth: 30, chars: 4, tip: T("中獎符號放大到幾 %，100 = 不跳") });
+        checkField(ls2, T("光暈"), "lineStyle", "glow");
         var ls3 = row(pLineStyle);
-        dropField(ls3, "中獎格", "lineStyle", "cellSource", ["builtin", "custom"], ["內建框", "自訂素材"], { labelWidth: 40 });
-        var btnCellAsset = ls3.add("button", undefined, "指定選取");
+        dropField(ls3, T("中獎格"), "lineStyle", "cellSource", ["builtin", "custom"], [T("內建框"), T("自訂素材")], { labelWidth: 40 });
+        var btnCellAsset = ls3.add("button", undefined, T("指定選取"));
         var stCellAsset = pLineStyle.add("statictext", undefined, "");
         stCellAsset.preferredSize.width = 320;
 
         // ================= 設定 =================
-        var pLayout = section(tSet, "版面");
+        var pLang = section(tSet, T("介面語言"));
+        var lg1 = row(pLang);
+        // 「繁體中文」不翻譯：介面是英文時也認得出來
+        var ddLang = lg1.add("dropdownlist", undefined, [T("自動"), "繁體中文", "English"]);
+        ddLang.selection = Math.max(0, U.indexOf(S.LANGS, A.langPref()));
+        ddLang.helpTip = T("自動：中文版 AE 用繁體中文；EffectCraft 和其他語言的 AE 用英文。切換後面板會重新建立，設定不會遺失。");
+        ddLang.onChange = function () {
+            if (!this.selection) { return; }
+            var v = S.LANGS[this.selection.index];
+            if (v === A.langPref()) { return; }
+            A.setLangPref(v);
+            A.initLang();
+            rebuild();
+        };
+        var pLayout = section(tSet, T("版面"));
         var l1 = row(pLayout);
-        numField(l1, "格寬", "layout", "cellW", "px", { min: 4, integer: true, labelWidth: 40 });
-        numField(l1, "格高", "layout", "cellH", "px", { min: 4, integer: true, labelWidth: 30 });
+        numField(l1, T("格寬"), "layout", "cellW", "px", { min: 4, integer: true, labelWidth: 40 });
+        numField(l1, T("格高"), "layout", "cellH", "px", { min: 4, integer: true, labelWidth: 30 });
         var l2 = row(pLayout);
-        numField(l2, "輪距", "layout", "gapX", "px", { min: 0, integer: true, labelWidth: 40, tip: "輪與輪之間的水平間距" });
-        numField(l2, "列距", "layout", "gapY", "px", { min: 0, integer: true, labelWidth: 30, tip: "同一輪上下符號的間距" });
+        numField(l2, T("輪距"), "layout", "gapX", "px", { min: 0, integer: true, labelWidth: 40, tip: T("輪與輪之間的水平間距") });
+        numField(l2, T("列距"), "layout", "gapY", "px", { min: 0, integer: true, labelWidth: 30, tip: T("同一輪上下符號的間距") });
         var l3 = row(pLayout);
-        numField(l3, "上下露出", "layout", "peek", "px", { min: 0, integer: true, tip: "轉輪視窗上下多露出的高度（看得到半顆相鄰符號）" });
-        numField(l3, "留白", "layout", "margin", "px", { min: 0, integer: true, labelWidth: 30, tip: "盤面合成四周留白，給繞框 / 連線光暈用" });
+        numField(l3, T("上下露出"), "layout", "peek", "px", { min: 0, integer: true, tip: T("轉輪視窗上下多露出的高度（看得到半顆相鄰符號）") });
+        numField(l3, T("留白"), "layout", "margin", "px", { min: 0, integer: true, labelWidth: 30, tip: T("盤面合成四周留白，給繞框 / 連線光暈用") });
         var l4 = row(pLayout);
-        dropField(l4, "符號縮放", "layout", "scaleMode", ["fit", "none"], ["符合格子", "原始尺寸"]);
+        dropField(l4, T("符號縮放"), "layout", "scaleMode", ["fit", "none"], [T("符合格子"), T("原始尺寸")]);
         numField(l4, "", "layout", "symbolScale", "%", { min: 1 });
         var l5 = row(pLayout);
-        dropField(l5, "輸出到", "layout", "target", ["active", "new"], ["目前合成", "新建合成"]);
-        numField(l5, "新合成", "layout", "newCompFps", "fps", { min: 1, max: 120, labelWidth: 40 });
-        var pFeel = section(tSet, "手感");
+        dropField(l5, T("輸出到"), "layout", "target", ["active", "new"], [T("目前合成"), T("新建合成")]);
+        numField(l5, T("新合成"), "layout", "newCompFps", "fps", { min: 1, max: 120, labelWidth: 40 });
+        var pFeel = section(tSet, T("手感"));
         var f1 = row(pFeel);
-        numField(f1, "起轉拉回", "spin", "windupDist", "格", { min: 0, tip: "開始前先反方向拉一點（0 = 不拉回）" });
-        numField(f1, "", "spin", "windupTime", "秒", { min: 0 });
+        numField(f1, T("起轉拉回"), "spin", "windupDist", T("格"), { min: 0, tip: T("開始前先反方向拉一點（0 = 不拉回）") });
+        numField(f1, "", "spin", "windupTime", T("秒"), { min: 0 });
         var f2 = row(pFeel);
-        numField(f2, "加速時間", "spin", "accelTime", "秒", { min: 0 });
-        numField(f2, "變速過渡", "spin", "speedRamp", "秒", { min: 0, labelWidth: 52, tip: "切換到繞框轉速的過渡時間" });
+        numField(f2, T("加速時間"), "spin", "accelTime", T("秒"), { min: 0 });
+        numField(f2, T("變速過渡"), "spin", "speedRamp", T("秒"), { min: 0, labelWidth: 52, tip: T("切換到繞框轉速的過渡時間") });
         var f3 = row(pFeel);
-        dropField(f3, "方向", "spin", "direction", ["down", "up"], ["向下", "向上"]);
-        var etSeed = numField(f3, "亂數種子", "spin", "seed", "", { min: 1, integer: true, chars: 6, labelWidth: 52, tip: "決定轉動中填充符號的排列，同一個種子結果相同" });
-        var btnSeed = f3.add("button", undefined, "換");
-        btnSeed.preferredSize.width = 30;
+        dropField(f3, T("方向"), "spin", "direction", ["down", "up"], [T("向下"), T("向上")]);
+        var etSeed = numField(f3, T("亂數種子"), "spin", "seed", "", { min: 1, integer: true, chars: 6, labelWidth: 52, tip: T("決定轉動中填充符號的排列，同一個種子結果相同") });
+        var btnSeed = f3.add("button", undefined, T("換"));
+        fitWidth(btnSeed, btnSeed.text, 30, 16);
         var f4 = row(pFeel);
-        checkField(f4, "動態模糊", "spin", "motionBlur");
-        numField(f4, "快門角度", "spin", "shutterAngle", "", { min: 0, max: 720, integer: true, labelWidth: 52 });
+        checkField(f4, T("動態模糊"), "spin", "motionBlur");
+        numField(f4, T("快門角度"), "spin", "shutterAngle", "", { min: 0, max: 720, integer: true, labelWidth: 52 });
 
         // ================= 底部動作 =================
         var gAct = row(win);
         gAct.alignChildren = ["fill", "center"];
-        var btnBuild = gAct.add("button", undefined, "▶ 建立假轉");
-        btnBuild.helpTip = "在目前合成（或新合成）建立轉輪動畫、繞框與連線";
-        var btnUpdate = gAct.add("button", undefined, "更新選取盤面");
-        btnUpdate.helpTip = "選取之前建立的盤面圖層，用目前設定重建（保留圖層位置 / 特效）";
+        var btnBuild = gAct.add("button", undefined, T("▶ 建立假轉"));
+        btnBuild.helpTip = T("在目前合成（或新合成）建立轉輪動畫、繞框與連線");
+        var btnUpdate = gAct.add("button", undefined, T("更新選取盤面"));
+        btnUpdate.helpTip = T("選取之前建立的盤面圖層，用目前設定重建（保留圖層位置 / 特效）");
         var gAct2 = row(win);
-        var btnLoad = gAct2.add("button", undefined, "讀取選取盤面");
-        btnLoad.helpTip = "把選取盤面圖層當時的設定讀回面板";
-        var btnSave = gAct2.add("button", undefined, "存設定…");
-        var btnOpen = gAct2.add("button", undefined, "開設定…");
+        var btnLoad = gAct2.add("button", undefined, T("讀取選取盤面"));
+        btnLoad.helpTip = T("把選取盤面圖層當時的設定讀回面板");
+        var btnSave = gAct2.add("button", undefined, T("存設定…"));
+        var btnOpen = gAct2.add("button", undefined, T("開設定…"));
         var status = win.add("statictext", undefined, "", { multiline: true });
         status.preferredSize = [340, 32];
 
@@ -718,7 +746,7 @@
             if (st.cfg.spin.autoRhythm) {
                 st.cfg.spin.autoRhythm = false;
                 cbAuto.value = false;
-                setStatus("已手動調整各輪；「節奏」頁改為按「套用節奏」才會覆蓋");
+                setStatus(T("已手動調整各輪；「節奏」頁改為按「套用節奏」才會覆蓋"));
             }
             refreshReelList(true);
             persist();
@@ -766,7 +794,7 @@
                 var R = st.cfg.reels[i];
                 var it = reelList.add("item", "R" + (i + 1));
                 var cols = [fmt2(R.start), fmt2(R.stop), fmt(R.speed), fmt2(R.decelTime) + " " + curveLabel(R.decelCurve),
-                    fmt2(R.overshoot), fmt2(R.bounceTime), R.frame ? "從 " + fmt2(R.frameStart) + (R.frameSpeed > 0 ? " @" + fmt(R.frameSpeed) : "") : "-"];
+                    fmt2(R.overshoot), fmt2(R.bounceTime), R.frame ? T("從 {0}{1}", fmt2(R.frameStart), R.frameSpeed > 0 ? " @" + fmt(R.frameSpeed) : "") : "-"];
                 for (var c = 0; c < cols.length; c++) {
                     try { it.subItems[c].text = cols[c]; } catch (e) { /* 單欄 listbox */ }
                 }
@@ -824,7 +852,7 @@
                 var ln = st.cfg.lines[i];
                 var it = lineList.add("item", String(i + 1));
                 var hl = ln.boxOnly || /(^|[\s,])[0-]([\s,]|$)/.test(ln.pattern);
-                var cols = [ln.pattern, hl ? "框" : String(ln.count), ln.shows];
+                var cols = [ln.pattern, hl ? T("框") : String(ln.count), ln.shows];
                 for (var c = 0; c < cols.length; c++) {
                     try { it.subItems[c].text = cols[c]; } catch (e) { /* 單欄 listbox */ }
                 }
@@ -834,20 +862,20 @@
         }
 
         function assetLabel(holder, idKey, nameKey) {
-            if (!holder[nameKey] && !holder[idKey]) { return "（尚未指定）"; }
+            if (!holder[nameKey] && !holder[idKey]) { return T("（尚未指定）"); }
             var it = null;
             try { it = A.itemById(holder[idKey]); } catch (e) { it = null; }
-            return (it ? "素材：" : "素材（找不到）：") + holder[nameKey];
+            return (it ? T("素材：") : T("素材（找不到）：")) + holder[nameKey];
         }
 
         function refreshAssets() {
-            stFrameAsset.text = st.cfg.frame.source === "custom" ? assetLabel(st.cfg.frame, "itemId", "itemName") : "內建：圓角框 + 兩道跑燈 + 光暈";
+            stFrameAsset.text = st.cfg.frame.source === "custom" ? assetLabel(st.cfg.frame, "itemId", "itemName") : T("內建：圓角框 + 兩道跑燈 + 光暈");
             stCellAsset.text = st.cfg.lineStyle.cellSource === "custom" ? assetLabel(st.cfg.lineStyle, "cellItemId", "cellItemName") : "";
         }
 
         // ================= 刷新 =================
         function symbolLabel(e) {
-            return (e.filler ? "● " : "○ ") + e.name + (st.missing[e.name] ? "  (遺失)" : "");
+            return (e.filler ? "● " : "○ ") + e.name + (st.missing[e.name] ? T("  (遺失)") : "");
         }
 
         function refreshSymbols(keepIdx) {
@@ -879,7 +907,7 @@
             if (idx < 0) { return; }
             st.brush = name;
             ddBrush.selection = idx;
-            setStatus("畫筆：" + name);
+            setStatus(T("畫筆：{0}", name));
         }
 
         function cellSize() {
@@ -919,7 +947,7 @@
                     var name = board[r] && board[r][y] ? board[r][y] : "";
                     b.sfsName = name;
                     b.text = name || "-";
-                    b.helpTip = "第 " + (r + 1) + " 輪 第 " + (y + 1) + " 列：" + (name || "（空）");
+                    b.helpTip = T("第 {0} 輪 第 {1} 列：{2}", r + 1, y + 1, name || T("（空）"));
                     if (st.useThumbs) { redraw(b); }
                 }
             }
@@ -937,9 +965,7 @@
                 stops.push("R" + (plan.reels[i].index + 1) + " " + fmt2(plan.reels[i].stopTime - plan.startTime));
                 maxV = Math.max(maxV, plan.reels[i].speed / plan.pitch);
             }
-            var txt = "停輪(秒)：" + stops.join("  ") +
-                "\n全部停妥 " + fmt2(plan.allSettled - plan.startTime) + " 秒、演出結束 " + fmt2(plan.endTime - plan.startTime) +
-                " 秒（@" + fmt(plan.fps) + "fps，最高 " + fmt(Math.round(maxV * 10) / 10) + " 格/秒）";
+            var txt = T("停輪(秒)：{0}\n全部停妥 {1} 秒、演出結束 {2} 秒（@{3}fps，最高 {4} 格/秒）", stops.join("  "), fmt2(plan.allSettled - plan.startTime), fmt2(plan.endTime - plan.startTime), fmt(plan.fps), fmt(Math.round(maxV * 10) / 10));
             if (plan.warnings.length) { txt += "\n⚠ " + plan.warnings[0]; }
             info.text = txt;
         }
@@ -995,28 +1021,28 @@
         }
 
         btnImport.onClick = function () {
-            var folder = Folder.selectDialog("選擇老虎機符號（圖騰）圖檔所在的資料夾");
+            var folder = Folder.selectDialog(T("選擇老虎機符號（圖騰）圖檔所在的資料夾"));
             if (!folder) { return; }
-            app.beginUndoGroup("SlotFakeSpin 匯入符號");
+            app.beginUndoGroup(T("SlotFakeSpin 匯入符號"));
             var res;
             try { res = A.importFolder(folder); } finally { app.endUndoGroup(); }
             if (!res.symbols.length && !res.failed.length) {
-                alert("這個資料夾裡沒有可用的圖檔（PNG / JPG / PSD / TGA / TIFF …）", S.NAME);
+                alert(T("這個資料夾裡沒有可用的圖檔（PNG / JPG / PSD / TGA / TIFF …）"), S.NAME);
                 return;
             }
             var added = addSymbols(res.symbols);
-            setStatus("匯入 " + res.symbols.length + " 個圖檔，新增 " + added + " 個符號");
-            if (res.failed.length) { alert("以下檔案無法匯入：\n" + res.failed.join("\n"), S.NAME); }
+            setStatus(T("匯入 {0} 個圖檔，新增 {1} 個符號", res.symbols.length, added));
+            if (res.failed.length) { alert(T("以下檔案無法匯入：\n{0}", res.failed.join("\n")), S.NAME); }
         };
 
         btnAddSel.onClick = function () {
             var found = A.selectedProjectSources();
             if (!found.length) {
-                alert("請先在「專案」面板選取素材或合成", S.NAME);
+                alert(T("請先在「專案」面板選取素材或合成"), S.NAME);
                 return;
             }
             var added = addSymbols(found);
-            setStatus("新增 " + added + " 個符號");
+            setStatus(T("新增 {0} 個符號", added));
         };
 
         function toggleFiller() {
@@ -1056,9 +1082,9 @@
 
         btnRename.onClick = function () {
             var idx = selectedIndices(list);
-            if (idx.length !== 1) { alert("請選一個符號", S.NAME); return; }
+            if (idx.length !== 1) { alert(T("請選一個符號"), S.NAME); return; }
             var e = st.cfg.symbols[idx[0]];
-            var nn = prompt("新的符號名稱（文字編輯盤面時使用，建議簡短，例如 WILD、A、7）", e.name, S.NAME);
+            var nn = prompt(T("新的符號名稱（文字編輯盤面時使用，建議簡短，例如 WILD、A、7）"), e.name, S.NAME);
             if (nn === null) { return; }
             nn = U.trim(String(nn)).replace(/[,\t\r\n]/g, "_");
             if (!nn || nn === e.name) { return; }
@@ -1079,7 +1105,7 @@
         btnRemove.onClick = function () {
             var idx = selectedIndices(list);
             if (!idx.length) { return; }
-            if (!confirm("移除 " + idx.length + " 個符號？盤面上使用到它們的格子會清空。", false, S.NAME)) { return; }
+            if (!confirm(T("移除 {0} 個符號？盤面上使用到它們的格子會清空。", idx.length), false, S.NAME)) { return; }
             for (var i = idx.length - 1; i >= 0; i--) {
                 replaceInBoards(st.cfg.symbols[idx[i]].name, "");
                 st.cfg.symbols.splice(idx[i], 1);
@@ -1091,7 +1117,7 @@
 
         btnClear.onClick = function () {
             if (!st.cfg.symbols.length) { return; }
-            if (!confirm("清空整個符號庫與兩個盤面？（專案裡已匯入的素材不會被刪除）", false, S.NAME)) { return; }
+            if (!confirm(T("清空整個符號庫與兩個盤面？（專案裡已匯入的素材不會被刪除）"), false, S.NAME)) { return; }
             var L = st.cfg.layout;
             st.cfg.symbols = [];
             st.cfg.startBoard = S.board.create(L.reels, L.rows, "");
@@ -1111,7 +1137,7 @@
                 if (board[r][y]) { setBrush(board[r][y]); }
                 return;
             }
-            if (!st.brush) { setStatus("請先匯入符號並選擇畫筆"); return; }
+            if (!st.brush) { setStatus(T("請先匯入符號並選擇畫筆")); return; }
             if (ks.shiftKey) {
                 for (var yy = 0; yy < board[r].length; yy++) { board[r][yy] = st.brush; }
             } else {
@@ -1160,18 +1186,18 @@
             refreshLineList();
             persist();
             updatePlan();
-            setStatus("盤面改為 " + nr + "×" + ny + "，已重新產生各輪節奏" + (dropped ? "，移除 " + dropped + " 條不符的連線" : ""));
+            setStatus(T("盤面改為 {0}×{1}，已重新產生各輪節奏{2}", nr, ny, dropped ? T("，移除 {0} 條不符的連線", dropped) : ""));
         };
 
         btnRandom.onClick = function () {
             var pool = S.fillerPool(st.cfg);
-            if (!pool.length) { setStatus("符號庫是空的"); return; }
+            if (!pool.length) { setStatus(T("符號庫是空的")); return; }
             var L = st.cfg.layout;
             setCurrentBoard(S.board.randomize(L.reels, L.rows, pool, new S.Rng(randomSeed())));
         };
 
         btnFillAll.onClick = function () {
-            if (!st.brush) { setStatus("請先選擇畫筆"); return; }
+            if (!st.brush) { setStatus(T("請先選擇畫筆")); return; }
             var L = st.cfg.layout;
             setCurrentBoard(S.board.create(L.reels, L.rows, st.brush));
         };
@@ -1180,7 +1206,7 @@
             if (st.editing === "start") { st.cfg.endBoard = U.clone(st.cfg.startBoard); }
             else { st.cfg.startBoard = U.clone(st.cfg.endBoard); }
             persist();
-            setStatus(st.editing === "start" ? "已複製起始盤面 → 結果盤面" : "已複製結果盤面 → 起始盤面");
+            setStatus(st.editing === "start" ? T("已複製起始盤面 → 結果盤面") : T("已複製結果盤面 → 起始盤面"));
         };
 
         btnSwap.onClick = function () {
@@ -1189,7 +1215,7 @@
             st.cfg.endBoard = t;
             refreshCells();
             persist();
-            setStatus("已互換起始 / 結果盤面");
+            setStatus(T("已互換起始 / 結果盤面"));
         };
 
         // 多行文字對話框；onOk(text) 回傳錯誤陣列（空 = 成功）
@@ -1207,8 +1233,8 @@
             }
             var gb = d.add("group");
             gb.alignment = "right";
-            var ok = gb.add("button", undefined, "套用", { name: "ok" });
-            gb.add("button", undefined, "取消", { name: "cancel" });
+            var ok = gb.add("button", undefined, T("套用"), { name: "ok" });
+            gb.add("button", undefined, T("取消"), { name: "cancel" });
             ok.onClick = function () {
                 var errs = onOk(et.text);
                 if (errs.length) { alert(errs.join("\n"), S.NAME); return; }
@@ -1219,11 +1245,11 @@
 
         btnText.onClick = function () {
             var L = st.cfg.layout;
-            var which = st.editing === "start" ? "起始盤面" : "結果盤面";
-            textDialog("文字編輯" + which,
-                "每一行是一列（由上到下），每行 " + L.reels + " 個符號，共 " + L.rows + " 行。\n用空白分隔；名稱有空白時改用逗號或 Tab（可直接貼上試算表）。",
+            var which = st.editing === "start" ? T("起始盤面") : T("結果盤面");
+            textDialog(T("文字編輯{0}", which),
+                T("每一行是一列（由上到下），每行 {0} 個符號，共 {1} 行。\n用空白分隔；名稱有空白時改用逗號或 Tab（可直接貼上試算表）。", L.reels, L.rows),
                 S.board.toText(currentBoard(), L.rows),
-                "可用符號：" + names().join("  "),
+                T("可用符號：{0}", names().join("  ")),
                 function (text) {
                     var res = S.board.parseText(text, L.reels, L.rows, names());
                     if (!res.errors.length) { setCurrentBoard(res.board); }
@@ -1234,12 +1260,12 @@
         // ================= 節奏 / 各輪事件 =================
         btnCTI.onClick = function () {
             var c = A.activeComp();
-            if (!c) { alert("沒有作用中的合成", S.NAME); return; }
+            if (!c) { alert(T("沒有作用中的合成"), S.NAME); return; }
             st.cfg.spin.startTime = Math.round(c.time * c.frameRate) / c.frameRate;
             etStart.text = fmt(st.cfg.spin.startTime);
             persist();
             updatePlan();
-            setStatus("開始時間 = " + fmt(st.cfg.spin.startTime) + " 秒（第 " + Math.round(c.time * c.frameRate) + " 格）");
+            setStatus(T("開始時間 = {0} 秒（第 {1} 格）", fmt(st.cfg.spin.startTime), Math.round(c.time * c.frameRate)));
         };
 
         btnApplyRhythm.onClick = function () {
@@ -1247,7 +1273,7 @@
             refreshReelList();
             persist();
             updatePlan();
-            setStatus("已依快速節奏重新產生各輪");
+            setStatus(T("已依快速節奏重新產生各輪"));
         };
 
         btnSuggest.onClick = function () {
@@ -1256,8 +1282,8 @@
             refreshReelList();
             persist();
             updatePlan();
-            setStatus(res.reels.length ? "期待輪：" + res.reels.join(", ") + "（已重新產生各輪）" : "這個結果盤面沒有需要期待的輪");
-            alert(res.reasons.join("\n") || "沒有需要期待的輪", S.NAME);
+            setStatus(res.reels.length ? T("期待輪：{0}（已重新產生各輪）", res.reels.join(", ")) : T("這個結果盤面沒有需要期待的輪"));
+            alert(res.reasons.join("\n") || T("沒有需要期待的輪"), S.NAME);
         };
 
         reelList.onChange = function () { syncReelEditor(); };
@@ -1292,7 +1318,7 @@
         btnShift.onClick = function () {
             var rs = selectedReels();
             if (!rs.length) { return; }
-            var v = prompt("把選取的 " + rs.length + " 輪時間平移幾秒？（負數 = 提早）", "0.1", S.NAME);
+            var v = prompt(T("把選取的 {0} 輪時間平移幾秒？（負數 = 提早）", rs.length), "0.1", S.NAME);
             if (v === null) { return; }
             var dt = parseFloat(v);
             if (isNaN(dt)) { return; }
@@ -1307,7 +1333,7 @@
         // ================= 繞框 / 連線事件 =================
         function pickAsset(holder, idKey, nameKey, pathKey) {
             var found = A.selectedProjectSources();
-            if (!found.length) { alert("請先在「專案」面板選取一個素材或合成", S.NAME); return false; }
+            if (!found.length) { alert(T("請先在「專案」面板選取一個素材或合成"), S.NAME); return false; }
             holder[idKey] = found[0].item.id;
             holder[nameKey] = found[0].item.name;
             holder[pathKey] = found[0].path || "";
@@ -1336,8 +1362,8 @@
         btnPaylines.onClick = function () {
             var L = st.cfg.layout;
             var cur = LN.paylines(st.cfg);
-            textDialog("線型表",
-                "每行一條線：寫每輪第幾列（1 = 最上面），共 " + L.reels + " 個數字。\n例：2 2 2 2 2 是中間直線、1 2 3 2 1 是 V 形。清空 = 用內建線型。",
+            textDialog(T("線型表"),
+                T("每行一條線：寫每輪第幾列（1 = 最上面），共 {0} 個數字。\n例：2 2 2 2 2 是中間直線、1 2 3 2 1 是 V 形。清空 = 用內建線型。", L.reels),
                 LN.paylinesToText(cur.lines), null,
                 function (text) {
                     var old = st.cfg.lineSet.paylines;
@@ -1345,7 +1371,7 @@
                     var chk = LN.paylines(st.cfg);
                     if (chk.errors.length) { st.cfg.lineSet.paylines = old; return chk.errors; }
                     persist();
-                    setStatus("線型表：" + chk.lines.length + " 條");
+                    setStatus(T("線型表：{0} 條", chk.lines.length));
                     return [];
                 });
         };
@@ -1353,7 +1379,7 @@
         btnDetect.onClick = function () {
             var res = LN.detect(st.cfg);
             if (res.errors.length) { alert(res.errors.join("\n"), S.NAME); return; }
-            if (!res.lines.length) { setStatus("結果盤面沒有偵測到連線"); return; }
+            if (!res.lines.length) { setStatus(T("結果盤面沒有偵測到連線")); return; }
             var lines = [], desc = [];
             for (var i = 0; i < res.lines.length; i++) {
                 var d = S.lineDefaults();
@@ -1361,13 +1387,13 @@
                 d.count = res.lines[i].count;
                 d.boxOnly = !!res.lines[i].boxOnly;
                 lines.push(d);
-                desc.push((res.lines[i].scatter ? "" : "線 " + res.lines[i].payline + "：") + res.lines[i].symbol + "×" + res.lines[i].count);
+                desc.push((res.lines[i].scatter ? "" : T("線 {0}：", res.lines[i].payline)) + res.lines[i].symbol + "×" + res.lines[i].count);
             }
             st.cfg.lines = LN.applyTiming(lines, st.cfg.lineGen);
             refreshLineList();
             persist();
             updatePlan();
-            setStatus("偵測到 " + lines.length + " 條連線：" + desc.join("、"));
+            setStatus(T("偵測到 {0} 條連線：{1}", lines.length, desc.join(T("、"))));
         };
 
         btnAddLine.onClick = function () {
@@ -1403,12 +1429,12 @@
         };
 
         btnLineTiming.onClick = function () {
-            if (!st.cfg.lines.length) { setStatus("還沒有連線"); return; }
+            if (!st.cfg.lines.length) { setStatus(T("還沒有連線")); return; }
             LN.applyTiming(st.cfg.lines, st.cfg.lineGen);
             refreshLineList(true);
             persist();
             updatePlan();
-            setStatus("已重新排定 " + st.cfg.lines.length + " 條連線的顯示時間");
+            setStatus(T("已重新排定 {0} 條連線的顯示時間", st.cfg.lines.length));
         };
 
         btnSeed.onClick = function () {
@@ -1421,12 +1447,11 @@
         function report(res, verb) {
             if (res.errors.length) {
                 alert(res.errors.join("\n"), S.NAME);
-                setStatus(verb + "失敗");
+                setStatus(T("{0}失敗", verb));
                 return;
             }
             var p = res.plan;
-            setStatus(verb + "完成：" + res.boardComp.name + "（" + p.reels.length + " 輪、" + p.frames.length + " 個繞框、" +
-                p.lines.length + " 條連線，演出到 " + fmt2(p.endTime + (res.boardLayer.startTime || 0)) + " 秒）");
+            setStatus(T("{0}完成：{1}（{2} 輪、{3} 個繞框、{4} 條連線，演出到 {5} 秒）", verb, res.boardComp.name, p.reels.length, p.frames.length, p.lines.length, fmt2(p.endTime + (res.boardLayer.startTime || 0))));
             if (res.warnings.length) { alert(res.warnings.join("\n"), S.NAME); }
             refreshSymbols(selectedIndices(list));
             refreshAssets();
@@ -1434,74 +1459,86 @@
         }
 
         btnBuild.onClick = function () {
-            report(A.build(st.cfg, {}), "建立");
+            report(A.build(st.cfg, {}), T("建立"));
         };
 
         btnUpdate.onClick = function () {
             var lyr = A.selectedBoardLayer();
             if (!lyr) {
-                alert("請在合成中選取一個由 " + S.NAME + " 建立的盤面圖層", S.NAME);
+                alert(T("請在合成中選取一個由 {0} 建立的盤面圖層", S.NAME), S.NAME);
                 return;
             }
-            report(A.build(st.cfg, { boardLayer: lyr }), "更新");
+            report(A.build(st.cfg, { boardLayer: lyr }), T("更新"));
         };
 
         btnLoad.onClick = function () {
             var lyr = A.selectedBoardLayer();
             var cfg = lyr ? A.readBoardConfig(lyr) : null;
             if (!cfg) {
-                alert("請在合成中選取一個由 " + S.NAME + " 建立的盤面圖層", S.NAME);
+                alert(T("請在合成中選取一個由 {0} 建立的盤面圖層", S.NAME), S.NAME);
                 return;
             }
             st.cfg = cfg;
             syncAll();
             persist();
-            setStatus("已讀取：" + lyr.source.name);
+            setStatus(T("已讀取：{0}", lyr.source.name));
         };
 
         btnSave.onClick = function () {
             if (!canWriteFiles()) {
-                alert("請先到 偏好設定 > 指令碼與運算式，勾選「允許指令碼寫入檔案及存取網路」", S.NAME);
+                alert(T("請先到 偏好設定 > 指令碼與運算式，勾選「允許指令碼寫入檔案及存取網路」"), S.NAME);
                 return;
             }
-            var f = File.saveDialog("儲存 " + S.NAME + " 設定檔", jsonFilter());
+            var f = File.saveDialog(T("儲存 {0} 設定檔", S.NAME), jsonFilter());
             if (!f) { return; }
             if (!/\.json$/i.test(f.name)) { f = new File(f.fsName + ".json"); }
             f.encoding = "UTF-8";
-            if (!f.open("w")) { alert("無法寫入：" + f.fsName, S.NAME); return; }
+            if (!f.open("w")) { alert(T("無法寫入：{0}", f.fsName), S.NAME); return; }
             f.write(S.json.stringify(st.cfg, 2));
             f.close();
-            setStatus("已儲存：" + decodeURI(f.name));
+            setStatus(T("已儲存：{0}", decodeURI(f.name)));
         };
 
         btnOpen.onClick = function () {
-            var f = File.openDialog("開啟 " + S.NAME + " 設定檔", jsonFilter());
+            var f = File.openDialog(T("開啟 {0} 設定檔", S.NAME), jsonFilter());
             if (!f) { return; }
             f.encoding = "UTF-8";
-            if (!f.open("r")) { alert("無法讀取：" + f.fsName, S.NAME); return; }
+            if (!f.open("r")) { alert(T("無法讀取：{0}", f.fsName), S.NAME); return; }
             var txt = f.read();
             f.close();
             var cfg;
             try { cfg = S.absolutizePaths(S.normalizeConfig(S.json.parse(txt)), f.parent.fsName); } catch (e) {
-                alert("設定檔格式錯誤：" + e.message, S.NAME);
+                alert(T("設定檔格式錯誤：{0}", e.message), S.NAME);
                 return;
             }
             // 設定檔可能來自別的專案：找不到的符號用檔案路徑重新匯入
-            app.beginUndoGroup("SlotFakeSpin 讀取設定");
+            app.beginUndoGroup(T("SlotFakeSpin 讀取設定"));
             try {
                 for (var i = 0; i < cfg.symbols.length; i++) { A.resolveSymbol(cfg.symbols[i], true); }
             } finally { app.endUndoGroup(); }
             st.cfg = cfg;
             syncAll();
             persist();
-            setStatus("已開啟：" + decodeURI(f.name));
+            setStatus(T("已開啟：{0}", decodeURI(f.name)));
         };
 
         // ================= 啟動 =================
         win.onResizing = win.onResize = function () {
             try { this.layout.resize(); } catch (e) { /* ignore */ }
         };
-        tabs.selection = st.cfg.symbols.length ? tBoard : tSym;
+        // 切換語言：清掉整個面板用新語言重建（浮動視窗則關掉重開），停在「設定」頁
+        function rebuild() {
+            persist();
+            UI.instance = null;
+            if (win instanceof Window) {
+                win.close();
+            } else {
+                while (win.children.length) { win.remove(win.children[0]); }
+            }
+            UI.create(thisObj, { tab: "settings" });
+        }
+
+        tabs.selection = opts.tab === "settings" ? tSet : (st.cfg.symbols.length ? tBoard : tSym);
         tabs.onChange = function () { updatePlan(); };
         refreshSymbols();
         rebuildGrid();
@@ -1509,7 +1546,7 @@
         refreshLineList();
         refreshAssets();
         updatePlan();
-        setStatus(st.cfg.symbols.length ? "就緒" : "第一步：到「符號」匯入老虎機符號圖檔");
+        setStatus(st.cfg.symbols.length ? T("就緒") : T("第一步：到「符號」匯入老虎機符號圖檔"));
 
         if (win instanceof Window) {
             win.center();

@@ -13,11 +13,11 @@ const acorn = require("acorn");
 const ROOT = path.join(__dirname, "..");
 // 面板：放進 ScriptUI Panels；套用腳本：給命令列 / agent 自動化用（不建立面板）
 const TARGETS = [
-  { out: "SlotFakeSpin.jsx", src: ["core.js", "ae.js", "ui.js", "main.js"],
+  { out: "SlotFakeSpin.jsx", src: ["core.js", "i18n_en.js", "ae.js", "ui.js", "main.js"],
     title: "After Effects slot machine fake-spin panel",
     install: [" * Install: copy this file to  Adobe After Effects <version>/Support Files/Scripts/ScriptUI Panels/",
       " *          restart AE, then open  Window > SlotFakeSpin.jsx"] },
-  { out: "SlotFakeSpin_apply.jsx", src: ["core.js", "ae.js", "apply.js"],
+  { out: "SlotFakeSpin_apply.jsx", src: ["core.js", "i18n_en.js", "ae.js", "apply.js"],
     title: "automation entry: build a board from a preset JSON",
     install: [" * Usage: run from File > Scripts > Run Script File (asks for a preset),",
       " *        or let tools/sfs.js launch it via $.global.SFS_APPLY."] },

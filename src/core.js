@@ -6,9 +6,50 @@
 var SFS = SFS || {};
 
 (function (S) {
-    S.VERSION = "1.1.0";
+    S.VERSION = "1.2.0";
     S.NAME = "SlotFakeSpin";
     S.TAG = "SFS_BOARD";
+
+    // ------------------------------------------------------------------
+    // 介面語言：原始碼的繁中字串就是 key，英文對照在 i18n_en.js
+    // ------------------------------------------------------------------
+    S.LANGS = ["auto", "zh", "en"];
+    S.lang = "zh";
+    S.I18N = {};
+
+    // pref：auto / zh / en。auto 時 EffectCraft（Windows 介面字型沒有中文）與非中文 AE 用英文
+    S.detectLang = function (pref) {
+        if (pref === "zh" || pref === "en") { return pref; }
+        try {
+            if (typeof $ !== "undefined" && /EffectCraft/i.test(String($.os))) { return "en"; }
+        } catch (e) { /* ignore */ }
+        try {
+            if (typeof app !== "undefined" && app.isoLanguage) { return /^zh/i.test(String(app.isoLanguage)) ? "zh" : "en"; }
+        } catch (e2) { /* ignore */ }
+        return "zh";
+    };
+
+    // T("第 {0} 行", 3)：翻譯後代入參數
+    // 同一個中文在不同地方要翻成不同英文時，key 前面加語境：T("count\u0004連")，中文顯示時會去掉語境
+    S.t = function (s) {
+        var d = S.I18N[S.lang], out = s, args = arguments, c = s.indexOf("\u0004");
+        if (d && d.hasOwnProperty(s)) { out = d[s]; } else if (c >= 0) { out = s.substring(c + 1); }
+        if (args.length > 1) {
+            out = out.replace(/\{(\d+)\}/g, function (m, n) {
+                n = Number(n) + 1;
+                return n < args.length ? String(args[n]) : m;
+            });
+        }
+        return out;
+    };
+
+    S.tList = function (arr) {
+        var out = [];
+        for (var i = 0; i < arr.length; i++) { out.push(S.t(arr[i])); }
+        return out;
+    };
+
+    var T = S.t;
 
     // ------------------------------------------------------------------
     // 工具
@@ -643,7 +684,7 @@ var SFS = SFS || {};
         }
         var board = B.create(reels, rows, "");
         if (lines.length !== rows) {
-            errors.push("需要 " + rows + " 行（每行一列），目前有 " + lines.length + " 行");
+            errors.push(T("需要 {0} 行（每行一列），目前有 {1} 行", rows, lines.length));
         }
         for (var y = 0; y < Math.min(rows, lines.length); y++) {
             var line = lines[y];
@@ -653,12 +694,12 @@ var SFS = SFS || {};
                 if (U.trim(tokens[i]) !== "") { clean.push(U.trim(tokens[i])); }
             }
             if (clean.length !== reels) {
-                errors.push("第 " + (y + 1) + " 行需要 " + reels + " 個符號，目前有 " + clean.length + " 個");
+                errors.push(T("第 {0} 行需要 {1} 個符號，目前有 {2} 個", y + 1, reels, clean.length));
             }
             for (var r = 0; r < Math.min(reels, clean.length); r++) {
                 var m = B.matchName(clean[r], names);
                 if (m === null) {
-                    errors.push("第 " + (y + 1) + " 行第 " + (r + 1) + " 個：找不到符號「" + clean[r] + "」");
+                    errors.push(T("第 {0} 行第 {1} 個：找不到符號「{2}」", y + 1, r + 1, clean[r]));
                 } else {
                     board[r][y] = m;
                 }
@@ -670,16 +711,16 @@ var SFS = SFS || {};
     B.validate = function (board, reels, rows, names, label) {
         var errors = [];
         if (!U.isArray(board) || board.length !== reels) {
-            errors.push(label + "：輪數不符");
+            errors.push(T("{0}：輪數不符", label));
             return errors;
         }
         for (var r = 0; r < reels; r++) {
             for (var y = 0; y < rows; y++) {
                 var v = board[r] ? board[r][y] : "";
                 if (!v) {
-                    errors.push(label + "：第 " + (r + 1) + " 輪第 " + (y + 1) + " 列是空的");
+                    errors.push(T("{0}：第 {1} 輪第 {2} 列是空的", label, r + 1, y + 1));
                 } else if (U.indexOf(names, v) < 0) {
-                    errors.push(label + "：第 " + (r + 1) + " 輪第 " + (y + 1) + " 列的符號「" + v + "」不在符號庫裡");
+                    errors.push(T("{0}：第 {1} 輪第 {2} 列的符號「{3}」不在符號庫裡", label, r + 1, y + 1, v));
                 }
             }
         }
@@ -784,7 +825,7 @@ var SFS = SFS || {};
             if (U.trim(rawLines[i]) === "") { continue; }
             var p = LN.parsePattern(rawLines[i], L.reels, L.rows);
             if (!p) {
-                errors.push("線型表第 " + (i + 1) + " 行要有 " + L.reels + " 個 1~" + L.rows + " 的數字：" + rawLines[i]);
+                errors.push(T("線型表第 {0} 行要有 {1} 個 1~{2} 的數字：{3}", i + 1, L.reels, L.rows, rawLines[i]));
             } else {
                 var one = [];
                 for (var k = 0; k < p.length; k++) { one.push(p[k] + 1); }
@@ -913,8 +954,7 @@ var SFS = SFS || {};
             for (k = 0; k < steps.length; k++) {
                 if (landed >= need - 1 && (landed < need || R.after)) {
                     for (i = 0; i < steps[k].length; i++) {
-                        mark(steps[k][i], "已停的輪有 " + landed + " 顆 " + trig.join("/") +
-                            (landed < need ? "（差 1 顆觸發）" : "（已觸發，追更多顆）"));
+                        mark(steps[k][i], T("已停的輪有 {0} 顆 {1}{2}", landed, trig.join("/"), landed < need ? T("（差 1 顆觸發）") : T("（已觸發，追更多顆）")));
                     }
                 }
                 for (i = 0; i < steps[k].length; i++) {
@@ -924,8 +964,7 @@ var SFS = SFS || {};
                     }
                 }
             }
-            reasons.push(trig.join("/") + " 共 " + landed + " 顆（" + need + " 顆觸發）" +
-                (landed >= need ? "：觸發" : "：未觸發"));
+            reasons.push(T("{0} 共 {1} 顆（{2} 顆觸發）{3}", trig.join("/"), landed, need, landed >= need ? T("：觸發") : T("：未觸發")));
         }
 
         // 2. 聽牌型
@@ -946,7 +985,7 @@ var SFS = SFS || {};
                 for (r = teaseMin; r <= Math.min(run, L.reels - 1); r++) {
                     var visible = true;
                     for (var p = 0; p < r; p++) { if (stepOf[p] >= stepOf[r]) { visible = false; } }
-                    if (visible) { mark(r, "線 " + (li + 1) + " 的 " + target + " 已連 " + r + " 輪（聽牌）"); }
+                    if (visible) { mark(r, T("線 {0} 的 {1} 已連 {2} 輪（聽牌）", li + 1, target, r)); }
                 }
             }
         }
@@ -955,7 +994,7 @@ var SFS = SFS || {};
         for (r = 1; r <= L.reels; r++) {
             if (byReel[r]) {
                 list.push(r);
-                reasons.push("第 " + r + " 輪期待：" + byReel[r]);
+                reasons.push(T("第 {0} 輪期待：{1}", r, byReel[r]));
             }
         }
         return { reels: list, reasons: reasons, byReel: byReel };
@@ -975,46 +1014,46 @@ var SFS = SFS || {};
     S.validateConfig = function (cfg) {
         var e = [], L = cfg.layout, P = cfg.spin, i;
         var names = S.symbolNames(cfg);
-        if (!names.length) { e.push("符號庫是空的：請先匯入符號圖檔"); }
-        if (L.cellW < 4 || L.cellH < 4) { e.push("格子寬高至少要 4px"); }
-        if (L.gapX < 0 || L.gapY < 0 || L.peek < 0 || L.margin < 0) { e.push("間距 / 露出 / 留白不能是負數"); }
-        if (L.symbolScale <= 0) { e.push("符號縮放必須大於 0"); }
-        if (P.startTime < 0) { e.push("開始時間不能是負數"); }
+        if (!names.length) { e.push(T("符號庫是空的：請先匯入符號圖檔")); }
+        if (L.cellW < 4 || L.cellH < 4) { e.push(T("格子寬高至少要 4px")); }
+        if (L.gapX < 0 || L.gapY < 0 || L.peek < 0 || L.margin < 0) { e.push(T("間距 / 露出 / 留白不能是負數")); }
+        if (L.symbolScale <= 0) { e.push(T("符號縮放必須大於 0")); }
+        if (P.startTime < 0) { e.push(T("開始時間不能是負數")); }
         var nonNeg = ["windupDist", "windupTime", "accelTime", "speedRamp"];
         for (i = 0; i < nonNeg.length; i++) {
-            if (P[nonNeg[i]] < 0) { e.push("手感參數不能是負數：" + nonNeg[i]); }
+            if (P[nonNeg[i]] < 0) { e.push(T("手感參數不能是負數：{0}", nonNeg[i])); }
         }
         var bw = L.reels * L.cellW + (L.reels - 1) * L.gapX + 2 * L.margin;
         var bh = S.reelHeight(L) + 2 * L.margin;
-        if (bw > 30000 || bh > 30000) { e.push("盤面尺寸超過 AE 上限 30000px"); }
+        if (bw > 30000 || bh > 30000) { e.push(T("盤面尺寸超過 AE 上限 30000px")); }
         if (!U.isArray(cfg.reels) || cfg.reels.length !== L.reels) {
-            e.push("各輪節奏表與輪數不符，請按「套用節奏」");
+            e.push(T("各輪節奏表與輪數不符，請按「套用節奏」"));
         } else {
             for (i = 0; i < cfg.reels.length; i++) {
-                var R = cfg.reels[i], tag = "第 " + (i + 1) + " 輪：";
-                if (R.speed <= 0) { e.push(tag + "轉速必須大於 0"); }
-                if (R.start < 0) { e.push(tag + "起轉時間不能是負數"); }
-                if (R.stop <= R.start) { e.push(tag + "停輪時間必須晚於起轉時間"); }
-                if (R.decelTime < 0 || R.overshoot < 0 || R.bounceTime < 0) { e.push(tag + "減速 / 衝過 / 回彈不能是負數"); }
-                if (R.frame && R.frameStart >= R.stop) { e.push(tag + "繞框開始時間必須早於停輪時間"); }
-                if (R.frame && R.frameSpeed < 0) { e.push(tag + "繞框轉速不能是負數"); }
+                var R = cfg.reels[i], tag = T("第 {0} 輪：", i + 1);
+                if (R.speed <= 0) { e.push(T("{0}轉速必須大於 0", tag)); }
+                if (R.start < 0) { e.push(T("{0}起轉時間不能是負數", tag)); }
+                if (R.stop <= R.start) { e.push(T("{0}停輪時間必須晚於起轉時間", tag)); }
+                if (R.decelTime < 0 || R.overshoot < 0 || R.bounceTime < 0) { e.push(T("{0}減速 / 衝過 / 回彈不能是負數", tag)); }
+                if (R.frame && R.frameStart >= R.stop) { e.push(T("{0}繞框開始時間必須早於停輪時間", tag)); }
+                if (R.frame && R.frameSpeed < 0) { e.push(T("{0}繞框轉速不能是負數", tag)); }
             }
         }
         for (i = 0; i < cfg.lines.length; i++) {
-            var ln = cfg.lines[i], lt = "連線 " + (i + 1) + "：";
+            var ln = cfg.lines[i], lt = T("連線 {0}：", i + 1);
             var lp = LN.parsePattern(ln.pattern, L.reels, L.rows, true);
             if (!lp) {
-                e.push(lt + "線型要有 " + L.reels + " 個 1~" + L.rows + " 的數字（每輪第幾列；0 = 這輪不框），目前是「" + ln.pattern + "」");
+                e.push(T("{0}線型要有 {1} 個 1~{2} 的數字（每輪第幾列；0 = 這輪不框），目前是「{3}」", lt, L.reels, L.rows, ln.pattern));
             } else if (!ln.boxOnly && !LN.isHighlight(lp) && (ln.count < 1 || ln.count > L.reels)) {
-                e.push(lt + "連線數要在 1~" + L.reels + " 之間");
+                e.push(T("{0}連線數要在 1~{1} 之間", lt, L.reels));
             }
             var shows = LN.parseShows(ln.shows);
-            if (!shows) { e.push(lt + "顯示時間格式是「開始+長度」，例如 0.3+1.2, 1.6+0.9"); }
-            else if (!shows.length) { e.push(lt + "沒有設定顯示時間"); }
+            if (!shows) { e.push(T("{0}顯示時間格式是「開始+長度」，例如 0.3+1.2, 1.6+0.9", lt)); }
+            else if (!shows.length) { e.push(T("{0}沒有設定顯示時間", lt)); }
         }
         if (names.length) {
-            e = e.concat(B.validate(cfg.startBoard, L.reels, L.rows, names, "起始盤面"));
-            e = e.concat(B.validate(cfg.endBoard, L.reels, L.rows, names, "結果盤面"));
+            e = e.concat(B.validate(cfg.startBoard, L.reels, L.rows, names, T("起始盤面")));
+            e = e.concat(B.validate(cfg.endBoard, L.reels, L.rows, names, T("結果盤面")));
         }
         return e;
     };
@@ -1052,7 +1091,7 @@ var SFS = SFS || {};
         opts = opts || {};
         var L = cfg.layout, P = cfg.spin, F = cfg.frame;
         var errors = [], warnings = [];
-        if (!(fps > 0)) { return { errors: ["影格速率錯誤"], warnings: [] }; }
+        if (!(fps > 0)) { return { errors: [T("影格速率錯誤")], warnings: [] }; }
         var frame = 1 / fps, EPS = 1e-9;
         function snap(t) { return Math.round(t * fps) / fps; }
         function atLeast(t, min) { return t < min - EPS ? min : t; }
@@ -1093,7 +1132,7 @@ var SFS = SFS || {};
         };
 
         for (var i = 0; i < reels; i++) {
-            var R = reelCfg[i], tag = "第 " + (i + 1) + " 輪";
+            var R = reelCfg[i], tag = T("第 {0} 輪", i + 1);
             var overshoot = (R.overshoot > 0 && R.bounceTime > 0) ? R.overshoot * L.cellH : 0;
             var buffer = Math.ceil((L.peek + Math.max(windup, overshoot) + L.gapY) / pitch) + 1;
             var tS = snap(T0 + R.start);
@@ -1104,8 +1143,7 @@ var SFS = SFS || {};
             if (t3 > tStop - frame + EPS) { t3 = tStop - frame; }
             var t5 = overshoot > 0 ? atLeast(snap(tStop + R.bounceTime), tStop + frame) : tStop;
             if (t2 > t3 + EPS) {
-                errors.push(tag + "停得太早：從起轉到停輪至少要 " +
-                    (Math.round((t2 - tS + (tStop - t3)) * 100) / 100) + " 秒（拉回+加速+減速）");
+                errors.push(T("{0}停得太早：從起轉到停輪至少要 {1} 秒（拉回+加速+減速）", tag, Math.round((t2 - tS + (tStop - t3)) * 100) / 100));
                 continue;
             }
 
@@ -1124,7 +1162,7 @@ var SFS = SFS || {};
                 if (t3 - tB > EPS) { segs.push({ a: tB, b: t3, va: v2, vb: v2, d: v2 * (t3 - tB) }); }
                 vLast = v2;
             } else {
-                if (tA >= 0) { warnings.push(tag + "：繞框轉速的切換時間不在等速區段內，已忽略"); }
+                if (tA >= 0) { warnings.push(T("{0}：繞框轉速的切換時間不在等速區段內，已忽略", tag)); }
                 if (t3 - t2 > EPS) { segs.push({ a: t2, b: t3, va: v1, vb: v1, d: v1 * (t3 - t2) }); }
             }
             var curve = S.CURVES[R.decelCurve] || S.CURVES.standard;
@@ -1190,7 +1228,7 @@ var SFS = SFS || {};
             if (R.frame) {
                 var fs = snap(T0 + R.frameStart);
                 if (fs >= tStop - EPS) {
-                    errors.push(tag + "繞框開始時間必須早於停輪時間");
+                    errors.push(T("{0}繞框開始時間必須早於停輪時間", tag));
                 } else {
                     plan.frames.push({ reel: i, start: fs, end: snap(t5 + Math.max(0, F.hold)), x: rp.x });
                     plan.markers.push({ t: fs, label: "R" + (i + 1) + " FRAME" });
@@ -1208,7 +1246,7 @@ var SFS = SFS || {};
             var pat = LN.parsePattern(ln.pattern, reels, rows, true);
             var shows = LN.parseShows(ln.shows);
             if (!pat || !shows || !shows.length) {
-                errors.push("連線 " + (i + 1) + " 設定錯誤");
+                errors.push(T("連線 {0} 設定錯誤", i + 1));
                 continue;
             }
             var highlight = !!ln.boxOnly || LN.isHighlight(pat);

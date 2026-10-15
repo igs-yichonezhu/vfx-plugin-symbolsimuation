@@ -17,4 +17,4 @@ npm run build     # 只建置
 - `src/core.js` 是純邏輯（可在 Node 執行），AE DOM 只放 `src/ae.js`，面板在 `src/ui.js`，自動化入口 `src/apply.js`。
 - `tools/sfs.js`（Node）與 `tools/render.py`（Python + Pillow）是給 agent 用的命令列與預覽。
 - 改版本要同時改 `package.json` 和 `src/core.js` 的 `S.VERSION`（建置會檢查）。
-- 介面文字、註解、文件用繁體中文。
+- 介面文字、註解、文件用繁體中文。面板有英文版：介面字串一律包 `T("繁中原文 {0}", 參數)`（不要用 `+` 拼句子），並同步在 `src/i18n_en.js` 加英文（`npm test` 會檢查）。
