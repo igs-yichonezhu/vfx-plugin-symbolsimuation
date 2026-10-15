@@ -4,7 +4,8 @@
  *
  * 由啟動腳本先設定 $.global.SFS_APPLY 再 $.evalFile 本檔：
  *   { preset: 設定檔路徑, mode: "auto"|"new"|"update", comp: 目標合成名稱（可省略 = 目前合成）,
- *     board: 盤面合成名稱（可省略）, result: 結果 JSON 路徑, frames: "auto"|"none"|[秒...], framesDir: 輸出資料夾 }
+ *     board: 盤面合成名稱（可省略）, result: 結果 JSON 路徑, frames: "auto"|"none"|[秒...], framesDir: 輸出資料夾,
+ *     position: [x, y] 盤面中心位置 | null 置中（可省略 = 用設定檔的 layout.position） }
  * 直接從「檔案 > 指令碼 > 執行指令碼檔案」執行時，會跳出對話框選設定檔。
  */
 var job = null;
@@ -69,6 +70,8 @@ try {
         job = { preset: pf.fsName, mode: "auto" };
     }
     var cfg = SFS.absolutizePaths(SFS.normalizeConfig(SFS.json.parse(readText(job.preset))), new File(job.preset).parent.fsName);
+    // 啟動腳本帶的盤面位置（sfs.js ae --position 可以臨時改；null = 置中 / 更新時不動）
+    if (job.hasOwnProperty("position")) { cfg.layout.position = SFS.parsePosition(job.position); }
     var target = job.comp ? SFS.ae.findComp(job.comp) : SFS.ae.activeComp();
     if (job.comp && !target) { throw new Error("找不到合成「" + job.comp + "」"); }
     var mode = job.mode || "auto";

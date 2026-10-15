@@ -166,6 +166,92 @@ test("render --boards / symbols-sheet（需要 Pillow）" + (hasPillow ? "" : "�
   assert.ok(fs.statSync(path.join(tmp, "s.png")).size > 1000);
 });
 
+test("symbol --scale / set layout.position / show", () => {
+  sfs(["symbol", "p.json", "SEVEN", "--scale", "87%"]);
+  assert.strictEqual(preset().symbols.find((s) => s.name === "SEVEN").scale, 87);
+  sfs(["symbol", "p.json", "SEVEN", "--scale", "0"], true);
+  sfs(["set", "p.json", "layout.position=960,500"]);
+  deq(preset().layout.position, [960, 500]);
+  const out = sfs(["show", "p.json"]);
+  assert.ok(/位置 960, 500/.test(out) && /SEVEN\(87%\)/.test(out), out);
+  sfs(["set", "p.json", "layout.position="]);
+  assert.strictEqual(preset().layout.position, null);
+  assert.ok(/位置 置中/.test(sfs(["show", "p.json"])));
+  sfs(["symbol", "p.json", "SEVEN", "--scale", "100"]);
+});
+
+const launchJob = (dir) => vm.runInNewContext("var $ = {global: {}}; var File = function(){}; $.evalFile = function(){};" +
+  fs.readFileSync(path.join(tmp, dir, "launch.jsx"), "utf8") + "; $.global.SFS_APPLY");
+
+test("ae --dry-run：啟動腳本帶盤面位置；--position 可臨時改或 center", () => {
+  sfs(["set", "p.json", "layout.position=960,500"]);
+  assert.ok(/盤面位置：960, 500/.test(sfs(["ae", "p.json", "--dry-run", "--out", "run2"])));
+  deq(launchJob("run2").position, [960, 500]);
+  sfs(["ae", "p.json", "--dry-run", "--out", "run3", "--position", "100,200"]);
+  deq(launchJob("run3").position, [100, 200]);
+  assert.ok(/合成中央/.test(sfs(["ae", "p.json", "--dry-run", "--out", "run4", "--position", "center"])));
+  assert.strictEqual(launchJob("run4").position, null);
+  sfs(["ae", "p.json", "--dry-run", "--out", "run5", "--position", "abc"], true);
+  sfs(["set", "p.json", "layout.position="]);
+  assert.strictEqual(launchJob("run1").position, null, "preset without position");
+});
+
+const PY = ["python3", "python", "py"].find((exe) => cp.spawnSync(exe, ["-c", "import PIL"]).status === 0);
+const hasPsdTools = !!PY && cp.spawnSync(PY, ["-c", "import psd_tools"]).status === 0;
+
+test("tools/psd.py 單元測試（需要 Pillow；有 psd-tools 時多跑 PSD 讀取）" + (PY ? "" : "：略過"), () => {
+  if (!PY) return;
+  const r = cp.spawnSync(PY, [path.join(ROOT, "test", "psd_test.py")], { encoding: "utf8" });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+});
+
+test("from-psd（需要 Pillow + psd-tools）" + (hasPsdTools ? "" : "：略過，只檢查安裝提示"), () => {
+  if (!hasPsdTools) {
+    if (PY) assert.ok(/pip install psd-tools/.test(sfs(["from-psd", SFS_CLI, "--out", "x/p.json"], true)));
+    return;
+  }
+  const dir = path.join(tmp, "psd");
+  fs.mkdirSync(dir, { recursive: true });
+  const psdFile = path.join(dir, "遊戲畫面.psd");
+  const mk = cp.spawnSync(PY, [path.join(ROOT, "test", "psd_test.py"), "make", psdFile], { encoding: "utf8" });
+  assert.strictEqual(mk.status, 0, mk.stderr);
+  const out = sfs(["from-psd", psdFile, "--out", "psd/game/preset.json", "--names", "塔可=TACO,粉鑽=PINK,辣椒人=CHILI,藍鑽=BLUE",
+    "--triggers", "pink,blue", "--wilds", "CHILI"]);
+  const gameDir = path.join(dir, "game");
+  const p = JSON.parse(fs.readFileSync(path.join(gameDir, "preset.json"), "utf8"));
+  deq(p.symbols.map((s) => s.name), ["10", "A", "BLUE", "CHILI", "J", "K", "PINK", "Q", "TACO", "WILD", "綠鑽"]);
+  assert.ok(p.symbols.every((s) => /^symbols\//.test(s.path) && fs.existsSync(path.join(gameDir, s.path))), "relative symbol paths");
+  assert.strictEqual(H.SFS.board.toText(p.endBoard, 3), "TACO CHILI K BLUE TACO\nPINK CHILI J 綠鑽 PINK\nA CHILI 10 K A");
+  const L = p.layout;
+  deq([L.reels, L.rows, L.cellW, L.cellH, L.gapX, L.gapY, L.scaleMode, L.symbolScale], [5, 3, 100, 100, 4, 0, "none", 100]);
+  deq(L.position, [300, 270]);
+  assert.strictEqual(p.antRule.symbols, "PINK,BLUE");
+  assert.strictEqual(p.lineSet.exclude, "PINK,BLUE");
+  assert.strictEqual(p.lineSet.wilds, "CHILI");
+  deq(p.symbols.filter((s) => !s.filler).map((s) => s.name), ["BLUE", "PINK"]);
+  assert.ok(p.startBoard.every((col) => col.every((v) => v && v !== "PINK" && v !== "BLUE")), "no triggers on start board");
+  deq(H.SFS.lines.detect(Object.assign(H.SFS.normalizeConfig(p), { endBoard: p.startBoard })).lines, [], "no lines on start board");
+  assert.ok(/格線左上 \(42, 120\)，盤面中心 \(300, 270\)/.test(out), out);
+  assert.ok(/Q（第 2 輪第 1 列，被「辣椒人」蓋住）/.test(out), out);
+  assert.ok(/CHILI 110×104 比格子 100×100 大/.test(out) && /symbol .*preset\.json CHILI --scale 90/.test(out), out);
+  assert.ok(/綠鑽 --rename/.test(out) && /--names "綠鑽="/.test(out), out);
+  assert.ok(/WILD\[隱藏\]/.test(out), out);
+  assert.ok(fs.existsSync(path.join(gameDir, "bg.png")) && /背景（拿掉符號群組）：bg\.png/.test(out), out);
+  assert.ok(/✓ 設定正確/.test(sfs(["check", "psd/game/preset.json"])));
+  // 指定格子 / 不輸出背景 / 自動縮小太大的符號
+  const out2 = sfs(["from-psd", psdFile, "--out", "psd/fit/preset.json", "--fit-oversize", "--no-bg", "--cell", "96x100", "--gap", "8"]);
+  const q = JSON.parse(fs.readFileSync(path.join(dir, "fit", "preset.json"), "utf8"));
+  assert.strictEqual(q.symbols.find((s) => s.name === "辣椒人").scale, 87);
+  deq([q.layout.cellW, q.layout.cellH, q.layout.gapX, q.layout.gapY], [96, 100, 8, 0]);
+  deq(q.layout.position, [300, 270]);
+  assert.ok(!fs.existsSync(path.join(dir, "fit", "bg.png")));
+  assert.ok(/已設定縮放 87%/.test(out2), out2);
+  // 錯誤：找不到符號群組 / --triggers 不是符號
+  const err = sfs(["from-psd", psdFile, "--out", "psd/bad/p.json", "--group", "NOPE"], true);
+  assert.ok(/找不到符號群組「NOPE」/.test(err) && /SYMBOLS/.test(err), err);
+  assert.ok(/--triggers 的「NOPE」不是符號/.test(sfs(["from-psd", psdFile, "--out", "psd/bad/p.json", "--triggers", "NOPE"], true)));
+});
+
 // ---------------- AE 自動化入口（模擬 AE） ----------------
 function runApply(ctx, job) {
   ctx.$.global = ctx;
@@ -230,4 +316,22 @@ test("apply：沒有工作參數時跳出對話框選設定檔", () => {
   ctx.$.global = ctx;
   vm.runInContext(fs.readFileSync(path.join(ROOT, "dist", "SlotFakeSpin_apply.jsx"), "utf8"), ctx);
   assert.ok((ctx.__alerts || []).some((a) => /完成/.test(a)), (ctx.__alerts || []).join("\n"));
+});
+
+test("apply：啟動腳本的盤面位置覆蓋設定檔（null = 置中）", () => {
+  const ctx = newContext();
+  const main = ctx.app.project.items.addComp("Main", 1920, 1080, 1, 12, 30);
+  ctx.app.project.activeItem = main;
+  sfs(["set", "p.json", "layout.position=700,600"]);
+  const run = path.join(tmp, "apply-pos");
+  fs.mkdirSync(run, { recursive: true });
+  const boards = () => main._layers.filter((l) => l.comment === "SFS_BOARD");
+  let res = runApply(ctx, { preset: path.join(tmp, "p.json"), mode: "new", result: path.join(run, "a.json"), frames: "none" });
+  assert.ok(res.ok, res.errors.join("\n"));
+  deq(boards()[0].transform.position.value, [700, 600]);
+  res = runApply(ctx, { preset: path.join(tmp, "p.json"), mode: "new", result: path.join(run, "b.json"), frames: "none", position: [300, 400] });
+  deq(boards()[0].transform.position.value, [300, 400]);
+  res = runApply(ctx, { preset: path.join(tmp, "p.json"), mode: "new", result: path.join(run, "c.json"), frames: "none", position: null });
+  deq(boards()[0].transform.position.value, [960, 540]);
+  sfs(["set", "p.json", "layout.position="]);
 });

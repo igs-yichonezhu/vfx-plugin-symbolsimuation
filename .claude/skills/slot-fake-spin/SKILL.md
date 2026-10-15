@@ -1,11 +1,11 @@
 ---
 name: slot-fake-spin
-description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線，或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好。
+description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、或美術的遊戲畫面 PSD，要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線，或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好。
 ---
 
 # SlotFakeSpin：老虎機假轉
 
-你是懂老虎機期待感的動態導演，負責把開發人員給的「符號圖 + 盤面圖」變成 After Effects 裡的假轉演出，並用 SlotFakeSpin 工具（本 repo）完成。
+你是懂老虎機期待感的動態導演，負責把開發人員給的「符號圖 + 盤面圖」（或美術的遊戲畫面 PSD）變成 After Effects 裡的假轉演出，並用 SlotFakeSpin 工具（本 repo）完成。
 
 開始前先讀：
 - [reference/anticipation.md](reference/anticipation.md)：期待感原則、參考數值、情境配方、自我檢查清單（**設計節奏時一定要照這份**）
@@ -22,13 +22,29 @@ description: 老虎機假轉（fake spin）期待感導演。開發人員丟符�
 ## 流程
 
 ### 1. 收集輸入（缺什麼就問，一次問完）
-- **符號圖檔**：必須是電腦上的檔案（資料夾路徑）。貼在對話裡的圖看得到但不能匯入 AE；如果只有貼圖，請開發人員給檔案或資料夾。
-- **盤面圖**：結果盤面（必要）、起始盤面（可省略）。貼圖即可。
+- **遊戲畫面 PSD**（美術給的，有符號群組）：有的話最省事，符號、結果盤面、格子、盤面位置都從 PSD 讀（第 2 步 A）。
+- **符號圖檔**：沒有 PSD 時要，必須是電腦上的檔案（資料夾路徑）。貼在對話裡的圖看得到但不能匯入 AE；如果只有貼圖，請開發人員給檔案或資料夾。
+- **盤面圖**：結果盤面（必要；PSD 路線不用）、起始盤面（可省略）。貼圖即可。
 - **意圖**：一般轉？Free Game 觸發（幾顆 Scatter 觸發）？大獎聽牌？期待落空？要不要連線演出？
 - **AE 目標**：哪個合成（名稱）、從第幾秒開始轉（`spin.startTime`，可省略 = 0）、格子大小（看 AE 裡盤面的尺寸，或預設 200）。
 - **遊戲規則**（不確定就問，不要猜）：觸發需要幾顆 Scatter、哪些是百搭、線型（不給就用內建 20 線）。
 
 ### 2. 建立設定檔、認符號
+
+**A. 美術給遊戲畫面 PSD**（符號群組 + 轉輪窗圖層）
+```
+node tools/sfs.js from-psd <檔案.psd> --out work/<案子>/preset.json [--group SYMBOLS] [--reel-layer 轉輪]
+         [--names 塔可=TACO,粉鑽=PINK] [--triggers PINK,BLUE,GREEN] [--wilds CHILI]
+node tools/sfs.js symbols-sheet work/<案子>/preset.json work/<案子>/symbols.png
+```
+- 會把符號群組拆成 PNG（`symbols/`）、看得到的符號依位置排成結果盤面、從轉輪窗的分隔線量出格子 / 間距和盤面位置（寫進 `layout.position`，AE 建立時盤面放到 PSD 上同一個位置）、輸出拿掉符號的背景 `bg.png`。`scaleMode` 設成 `none`（符號維持 PSD 上的大小）。
+- 需要 Python 的 psd-tools：沒裝時工具會提示 `pip install psd-tools`，請開發人員安裝，不要自己裝。
+- 先讀輸出：符號名單、格子量測說明、被蓋住的圖層、警告。量錯時用 `--cell 200x200 --gap 4x0` 指定；群組 / 圖層名稱不同時用 `--group` / `--reel-layer` / `--frame-layer`。
+- 圖層名稱是中文時：先跑一次看名單，再加 `--names 塔可=TACO,...`（或對照 JSON）重跑換成短的英數字名稱；也可以之後 `symbol P 塔可 --rename TACO`。
+- 知道觸發 / 百搭符號就加 `--triggers` / `--wilds`（起始盤面才不會放觸發符號）；不知道就問，不要猜。
+- 「⚠ … 比格子大，在轉輪合成裡會被裁切」：問開發人員要接受裁切，還是縮小（`symbol P <名稱> --scale <%>`，或重跑加 `--fit-oversize`）。
+
+**B. 只有符號圖檔資料夾**
 ```
 node tools/sfs.js init --symbols <符號資料夾> --out work/<案子>/preset.json [--reels 5 --rows 3] [--cell 200]
 node tools/sfs.js symbols-sheet work/<案子>/preset.json work/<案子>/symbols.png
@@ -37,7 +53,8 @@ node tools/sfs.js symbols-sheet work/<案子>/preset.json work/<案子>/symbols.
 `init` 會自動把檔名含 wild / scatter / bonus 的符號設成百搭 / 觸發型；確認對不對，不對用 `set` 改 `lineSet.wilds`、`lineSet.exclude`、`antRule.symbols`，並用 `symbol P <名稱> --filler off` 讓觸發型符號不要在轉動中亂數出現。
 
 ### 3. 讀盤面圖
-照 [reading-boards.md](reference/reading-boards.md)：逐格讀 → `board` 寫入 → `render --boards` 產生圖 → 用 Read 看圖和原圖比對 → 把文字格子回報給開發人員確認。**有任何一格不確定就問。**
+- **從 PSD 建的**：結果盤面就是 PSD 上的盤面（同一格疊了好幾個符號時取最上層，被蓋住的會列出來）。`render P --boards work/<案子>/boards.png` 產生圖，用 Read 和 PSD 畫面比對，再把文字格子回報給開發人員確認。要演別的結果時用 `board P --end` 改。
+- **其他**：照 [reading-boards.md](reference/reading-boards.md)：逐格讀 → `board` 寫入 → `render --boards` 產生圖 → 用 Read 看圖和原圖比對 → 把文字格子回報給開發人員確認。**有任何一格不確定就問。**
 
 ### 4. 設計節奏
 1. 先跑 `suggest P` 看工具依結果盤面判斷的期待輪和理由。
@@ -66,6 +83,7 @@ node tools/sfs.js render P --sheet work/<案子>/keys.png --scale 0.4
 node tools/sfs.js ae P --comp "<合成名稱>" --out work/<案子>/ae
 ```
 - 預設 `--mode auto`：合成裡已有一個盤面就更新它（保留圖層位置和使用者加的特效），沒有就新建。
+- 設定檔有 `layout.position`（from-psd 會自動填）時，建立和更新都會把盤面中心放到合成的這個位置；把 `bg.png` 放在主合成（和 PSD 一樣大）最底層就會和 PSD 畫面對齊。要臨時置中用 `--position center`。
 - 失敗時看錯誤訊息，常見原因與處理在 [cli.md](reference/cli.md)「AE 端需求」。
 - 成功後用 Read 看回傳的 2~3 張 AE 實際畫面（例如 SPINNING、最後一輪停輪、LINE 1），確認和預覽一致。
 

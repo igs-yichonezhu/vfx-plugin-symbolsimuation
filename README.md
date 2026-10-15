@@ -2,7 +2,7 @@
 
 匯入老虎機符號（圖騰）→ 指定 **起始盤面** 與 **結果盤面** → 設計停輪節奏、期待感、繞框、連線 → 一鍵在 AE 合成裡建好。
 
-另外附一個懂期待感的 **Claude Code agent / skill**：開發人員丟符號圖和盤面圖，它會讀圖、設計節奏、出預覽，並直接驅動 AE 建好。
+另外附一個懂期待感的 **Claude Code agent / skill**：開發人員丟符號圖和盤面圖（或美術的遊戲畫面 PSD），它會讀圖、設計節奏、出預覽，並直接驅動 AE 建好。
 
 ![預覽](docs/preview.gif)
 
@@ -12,6 +12,9 @@
 
 **盤面**
 - 符號庫：整個資料夾匯入（PNG / JPG / PSD / TGA / TIFF…，檔名 = 符號名），也可以用專案裡的素材或合成（動態符號）。
+- **從遊戲畫面 PSD 開始**（命令列 `from-psd`）：符號群組拆成 PNG、讀出結果盤面、量出格子 / 間距和盤面在畫面上的位置，順便輸出拿掉符號的背景圖。
+- 盤面位置：設定 `layout.position` 後，建立 / 更新時盤面會放到合成的指定位置（對齊遊戲畫面）。
+- 個別符號縮放：比格子大、會被轉輪裁切的符號可以單獨縮小。
 - 任意輪數 × 列數。點格子畫、Alt+點吸取、Shift+點整輪；也能用文字輸入，或直接從 Excel / Google 試算表貼上。
 - 可以設定哪些符號不要在轉動中亂數出現（例如 Scatter / Bonus）。
 
@@ -79,6 +82,20 @@ Q     J     SCATTER A  A
 深入的節奏設計 / 審查可以交給 [`slot-anticipation-director`](.claude/agents/slot-anticipation-director.md) agent。
 
 > 符號要是電腦上的檔案（給資料夾路徑）；盤面圖直接貼上就可以。
+> 美術有遊戲畫面 PSD（符號放在 `SYMBOLS` 群組、轉輪窗圖層叫「轉輪」）時，直接給 PSD 路徑最省事：符號、結果盤面、格子、盤面位置都從 PSD 讀。
+
+### 從 PSD 開始
+
+```
+node tools/sfs.js from-psd "D:\art\MG.psd" --out work/spicy/preset.json --names 塔可=TACO,粉鑽=PINK,辣椒人=CHILI --triggers PINK --wilds CHILI
+```
+
+- 符號群組（`--group`，預設 `SYMBOLS`）每個圖層輸出成 `symbols/<名稱>.png`；「塔可 拷貝」「塔可 拷貝 2」算同一個符號，像素完全相同的圖層只留一個。中文名稱用 `--names`（或對照 JSON）換成短的英數字，沒給就保留原名（之後可以 `symbol --rename`）。
+- 看得到的符號依位置排成結果盤面；同一格疊了好幾個時取最上層（被蓋住的會列出來）。
+- 從轉輪窗圖層（`--reel-layer`，預設「轉輪」）的分隔直線量出格子、間距、盤面中心，寫進設定檔（`layout.position`、`scaleMode=none`）。量不準時用 `--cell 200x200 --gap 4x0` 指定。
+- 輸出 `bg.png`：PSD 裡 Photoshop 存的合成圖，蓋回轉輪框 / 轉輪窗把符號拿掉。放在 AE 主合成最底層，盤面就會疊在 PSD 上原本的位置。
+- 比格子大的符號會被轉輪合成裁切：會警告並給 `symbol <設定檔> <名稱> --scale <%>` 指令（或加 `--fit-oversize` 自動縮）。
+- 需要 Python 3 + Pillow + psd-tools：`pip install pillow psd-tools`。
 
 ### 命令列（agent 用，也可以自己用）
 
@@ -105,7 +122,7 @@ L1                                         111111111111111111
 ```
 
 完整指令：`node tools/sfs.js help`，說明在 [reference/cli.md](.claude/skills/slot-fake-spin/reference/cli.md)。
-- 預覽（`render`、`symbols-sheet`）需要 Python 3 + Pillow：`pip install pillow`。
+- 預覽（`render`、`symbols-sheet`）需要 Python 3 + Pillow：`pip install pillow`；`from-psd` 另外需要 psd-tools：`pip install psd-tools`。
 - `ae` 需要 AE 已開啟專案；找不到 AE 時設定環境變數 `SFS_AE`（Windows：`AfterFX.exe` 完整路徑；macOS：App 名稱，例如 `Adobe After Effects 2025`）。
 - 也可以在 AE 用 **檔案 → 指令碼 → 執行指令碼檔案** 執行 [`dist/SlotFakeSpin_apply.jsx`](dist/SlotFakeSpin_apply.jsx)，選一個設定檔直接建立。
 
@@ -151,7 +168,8 @@ src/apply.js     自動化進入點（讀設定檔建立，給 tools/sfs.js 用�
 tools/build.js   建置 dist/（ES3 文法檢查、移除註解、非 ASCII 轉 \uXXXX）
 tools/sfs.js     命令列（agent 用）
 tools/render.py  預覽繪製（Pillow）
-test/            模擬 AE（含形狀圖層、「新增屬性後舊參照失效」行為）與 ScriptUI 的測試
+tools/psd.py     讀遊戲畫面 PSD：拆符號、讀盤面、量格子、做背景（Pillow + psd-tools，給 from-psd 用）
+test/            模擬 AE（含形狀圖層、「新增屬性後舊參照失效」行為）與 ScriptUI 的測試；psd_test.py 是 PSD 讀取測試（沒有 psd-tools 時略過）
 .claude/         slot-fake-spin skill 與 slot-anticipation-director agent
 ```
 
@@ -170,4 +188,5 @@ npm run build   # 只建置 dist/
 - 盤面格子縮圖只支援 PNG / JPG 符號；PSD、合成只顯示名稱。縮圖顯示異常可以在「盤面」取消勾選「縮圖」。
 - 每一格是一個圖層，超大盤面或很長的轉動時間建立時會比較久。
 - 不支援跨格的大符號（例如 2×2 巨型符號）。
+- `from-psd` 輸出的符號 PNG 不含圖層樣式（陰影 / 光暈等）；格子是從轉輪窗的分隔線量的，美術圖沒有清楚的分隔線時請用 `--cell` / `--gap` 指定。
 - `ae` 輸出檢查畫面用的是 AE 未公開但長期存在的 `saveFrameToPng`；沒有的版本會略過畫面、照常建立。

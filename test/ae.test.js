@@ -418,3 +418,64 @@ test("目標合成太短時給警告", () => {
   deq(out.errors, []);
   assert.strictEqual(out.warnings.length, 1);
 });
+
+test("盤面位置：layout.position 放到指定位置（錨點 = 盤面中心），更新時重新套用；沒設定時置中 / 不動", () => {
+  const env = aeSetup();
+  const cfg = cfgFromImport(env, importSamples(env), (c) => { c.layout.position = [700, 640]; });
+  const out = env.S.ae.build(cfg, {});
+  deq(out.errors, []);
+  const tr = out.boardLayer.transform;
+  deq(tr.anchorPoint.value, [out.plan.boardW / 2, out.plan.boardH / 2]);
+  deq(tr.position.value, [700, 640]);
+  deq(env.S.ae.readBoardConfig(out.boardLayer).layout.position, [700, 640]);
+  // 被移動、盤面變大後更新：重新放回去，錨點跟著新的盤面中心
+  tr.position.setValue([10, 10]);
+  cfg.layout.gapX = 30;
+  const again = env.S.ae.build(cfg, { boardLayer: out.boardLayer });
+  deq(again.errors, []);
+  deq(tr.position.value, [700, 640]);
+  deq(tr.anchorPoint.value, [again.plan.boardW / 2, again.plan.boardH / 2]);
+  // 沒設定：更新時不動；新建時置中
+  cfg.layout.position = null;
+  tr.position.setValue([10, 20]);
+  env.S.ae.build(cfg, { boardLayer: out.boardLayer });
+  deq(tr.position.value, [10, 20]);
+  const fresh = env.S.ae.build(cfg, {});
+  deq(fresh.boardLayer.transform.position.value, [960, 540]);
+  // 位置分開成 X / Y 也能設
+  fresh.boardLayer.transform.position.dimensionsSeparated = true;
+  cfg.layout.position = "300,400";
+  deq(env.S.ae.build(cfg, { boardLayer: fresh.boardLayer }).errors, []);
+  assert.strictEqual(fresh.boardLayer.transform.property("ADBE Position_0").value, 300);
+  assert.strictEqual(fresh.boardLayer.transform.property("ADBE Position_1").value, 400);
+  // 合成外面 → 警告；位置有關鍵影格 → 不動並警告
+  cfg.layout.position = [5000, 100];
+  assert.ok(env.S.ae.build(cfg, {}).warnings.some((w) => /外面/.test(w)));
+  tr.position.setValueAtTime(0, [1, 1]);
+  cfg.layout.position = [700, 640];
+  const keyed = env.S.ae.build(cfg, { boardLayer: out.boardLayer });
+  deq(keyed.errors, []);
+  assert.ok(keyed.warnings.some((w) => /關鍵影格/.test(w)), keyed.warnings.join("\n"));
+  deq(tr.position.valueAtTime(0), [1, 1]);
+  assert.strictEqual(env.app._undo, 0);
+});
+
+test("個別符號縮放：symbols[i].scale 套在轉輪符號和中獎跳動上", () => {
+  const env = aeSetup();
+  const cfg = cfgFromImport(env, importSamples(env), (c) => {
+    c.symbols.find((s) => s.name === "SEVEN").scale = 50;
+    c.lines = [{ pattern: "2,2,2,2,2", count: 3, shows: "0.3+1.2", color: "" }];
+    c.lineStyle.pulse = 120;
+  });
+  const out = env.S.ae.build(cfg, {});
+  deq(out.errors, []);
+  const base = 200 / 256 * 100;
+  const rc2 = byName(out.boardComp, "Reel 2").source;
+  const syms = rc2._layers.filter((l) => !l.nullLayer);
+  assert.ok(syms.some((l) => /_SEVEN$/.test(l.name)));
+  syms.forEach((l) => near(l.transform.scale.value[0], /_SEVEN$/.test(l.name) ? base / 2 : base, 1e-9, l.name));
+  const w = byName(out.boardComp, "Win R2-2_SEVEN");
+  const s1 = out.plan.lines[0].shows[0];
+  near(w.transform.scale.valueAtTime(s1.start)[0], base / 2, 1e-6);
+  near(w.transform.scale.valueAtTime(s1.start + 0.1)[0], base / 2 * 1.2, 1e-6);
+});
