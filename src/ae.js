@@ -210,6 +210,20 @@
         return it;
     };
 
+    // EffectCraft 0.3.1 不理會 ImportOptions.sequence = false：檔名結尾是數字、同資料夾有同系列檔案的圖（C200.png、C400.png…）
+    // 會被匯入成連續圖檔，畫面隨時間換成別張。回傳這種符號的名稱（GIF 本來就可能是動畫，不算）。
+    A.sequenceSymbols = function (cfg, map) {
+        var out = [];
+        for (var i = 0; i < cfg.symbols.length; i++) {
+            var it = map[cfg.symbols[i].name];
+            try {
+                if (it instanceof FootageItem && it.mainSource && it.mainSource.isStill === false &&
+                    A.IMAGE_RE.test(it.name) && !/\.gif$/i.test(it.name)) { out.push(cfg.symbols[i].name); }
+            } catch (e) { /* 純色 / 佔位素材 */ }
+        }
+        return out;
+    };
+
     // ------------------------------------------------------------------
     // 讀回已建立的盤面
     // ------------------------------------------------------------------
@@ -341,14 +355,15 @@
             var s = rp.strip[k];
             var item = map[s.name];
             var lyr = rc.layers.add(item);
-            lyr.name = S.layerNameFor(rp.index, s);
+            lyr.name = S.layerNameFor(rp.index, s, rp.owner);
             lyr.parent = ctrl;
             lyr.transform.position.setValue(S.stripLocalPos(L, k));
             var sc = symbolScale(item, L, scales[s.name]);
             lyr.transform.scale.setValue([sc, sc]);
             lyr.motionBlur = mb;
             if (s.kind === "start") { lyr.label = 9; }
-            else if (s.kind === "end") { lyr.label = 1; }
+            else if (s.kind === "end" || (s.kind === "round" && s.lock)) { lyr.label = 1; }
+            else if (s.kind === "round") { lyr.label = 9; }
             else { lyr.shy = true; hasShy = true; }
             fitDuration(lyr, item, rc.duration);
         }
@@ -478,11 +493,12 @@
     }
 
     // ---------------- 繞框 ----------------
+    // fp：轉輪的繞框是 { reel, x }（框住整輪）；Hold & Spin 的期待格另外帶 { name, y, w, h }
     function buildFrame(board, fp, cfg, plan, asset) {
         var L = cfg.layout, F = cfg.frame;
-        var w = L.cellW + 2 * F.pad, h = plan.reelH + 2 * F.pad;
-        var pos = [fp.x, plan.margin + plan.reelH / 2];
-        var name = "Frame R" + (fp.reel + 1);
+        var w = fp.w || L.cellW + 2 * F.pad, h = fp.h || plan.reelH + 2 * F.pad;
+        var pos = [fp.x, fp.y !== undefined ? fp.y : plan.margin + plan.reelH / 2];
+        var name = fp.name || "Frame R" + (fp.reel + 1);
         if (asset) {
             return placeAsset(board, asset, name, pos, [w, h], "stretch", fp.start, fp.end, F.fade);
         }
@@ -629,6 +645,42 @@
         }
     }
 
+    // Hold & Spin 鎖住時符號跳動：停妥那一刻在盤面合成放一份符號（不會被格子裁切），放大再縮回後就消失
+    function buildLockPulses(board, plan, cfg, map) {
+        var L = cfg.layout, big = cfg.hs.lockPulse / 100, scales = S.symbolScales(cfg);
+        var up = S.hs.PULSE_UP, down = S.hs.PULSE_DOWN;
+        for (var i = 0; i < plan.pulses.length; i++) {
+            var pu = plan.pulses[i], item = map[pu.name], cell = plan.cells[pu.cell];
+            var lyr = board.layers.add(item);
+            lyr.name = "Lock " + cell.tag + "_" + pu.name;
+            lyr.transform.position.setValue([pu.x, pu.y]);
+            var base = symbolScale(item, L, scales[pu.name]);
+            fitDuration(lyr, item, pu.t + up + down);
+            lyr.inPoint = pu.t;
+            lyr.outPoint = pu.t + up + down;
+            var sc = lyr.transform.scale;
+            key(sc, pu.t, [base, base]);
+            key(sc, pu.t + up, [base * big, base * big]);
+            key(sc, pu.t + up + down, [base, base]);
+            lyr.label = 13;
+        }
+    }
+
+    // Hold & Spin：每格一個格子合成（1 格高的轉帶），由最後一格往前加，時間軸上 Cell 1-1 在最上面
+    function buildCells(boardComp, plan, cfg, map, folder, duration, fps, host) {
+        var mb = !!cfg.spin.motionBlur;
+        for (var i = plan.cells.length - 1; i >= 0; i--) {
+            var cp = plan.cells[i];
+            var cc = app.project.items.addComp(boardComp.name + "_C" + cp.tag, plan.cellW, plan.cellH, 1, duration, fps);
+            cc.parentFolder = folder;
+            buildReel(cc, { index: cp.index, owner: "C" + cp.tag, strip: cp.strip, startY: cp.startY, keys: cp.keys }, cfg, map, folder);
+            var cl = boardComp.layers.add(cc);
+            cl.name = "Cell " + cp.tag;
+            cl.transform.position.setValue([cp.x, cp.y]);
+            if (host.ec) { cl.motionBlur = mb; }
+        }
+    }
+
     function resolveAsset(holder, idKey, nameKey, pathKey) {
         var entry = { name: holder[nameKey], path: holder[pathKey], itemId: holder[idKey] };
         if (!entry.name && !entry.path && !entry.itemId) { return null; }
@@ -747,6 +799,12 @@
                 result.errors.push(T("找不到這些符號的素材：{0}（請重新匯入或從符號庫移除）", missing.join(", ")));
                 return result;
             }
+            if (host.ec) {
+                var seq = A.sequenceSymbols(cfg, map);
+                if (seq.length) {
+                    result.warnings.push(T("EffectCraft 把這些符號圖當成連續圖檔匯入（檔名結尾是數字、同資料夾有同系列的檔案），畫面會隨時間換成別張：{0}。請改檔名或把它們放到各自的資料夾（sfs.js ec 會自動處理）", seq.join(", ")));
+                }
+            }
             var frameAsset = null, cellAsset = null;
             if (cfg.frame.source === "custom" && plan.frames.length) {
                 frameAsset = resolveAsset(cfg.frame, "itemId", "itemName", "path");
@@ -801,6 +859,7 @@
                 } catch (eSh) { /* ignore */ }
             }
 
+            if (plan.mode === "holdspin") { buildCells(boardComp, plan, cfg, map, folder, duration, fps, host); }
             // 由最後一輪往前加，時間軸上 R1 會在最上面；轉輪合成用盤面合成的實際名稱（EffectCraft 可能改過名）
             for (i = plan.reels.length - 1; i >= 0; i--) {
                 var rp = plan.reels[i];
@@ -815,6 +874,7 @@
                 if (host.ec) { rl.motionBlur = mb; }
             }
             for (i = 0; i < plan.frames.length; i++) { buildFrame(boardComp, plan.frames[i], cfg, plan, frameAsset); }
+            if (plan.pulses) { buildLockPulses(boardComp, plan, cfg, map); }
             buildWinOverlays(boardComp, plan, cfg, map);
             for (i = 0; i < plan.lines.length; i++) { buildLine(boardComp, plan.lines[i], cfg, plan, cellAsset, host); }
             if (host.pathErrors.length) {

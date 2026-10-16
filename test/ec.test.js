@@ -182,7 +182,7 @@ test("解析 CLI 輸出：單行 JSON、render 的進度文字 + JSON、SFS_RESU
   assert.strictEqual(EC.describeError("no active composition"), "no active composition");
 });
 
-test("素材：判斷是否在專案資料夾內；--copy-assets 複製並改寫路徑（同名不同檔加編號）", () => {
+test("素材：判斷是否在專案資料夾內；--copy-assets 複製並改寫路徑（同名不同檔加編號、結尾是數字的放各自的資料夾）", () => {
   const proj = path.join(tmp, "assets", "proj"), other = path.join(tmp, "assets", "other");
   fs.mkdirSync(path.join(proj, "symbols"), { recursive: true });
   fs.mkdirSync(other, { recursive: true });
@@ -202,7 +202,8 @@ test("素材：判斷是否在專案資料夾內；--copy-assets 複製並改寫
   const copied = EC.copyAssets(outside, proj, "p");
   assert.strictEqual(copied.length, cfg.symbols.length);
   assert.strictEqual(cfg.symbols[0].path, path.join(proj, "sfs_assets", "p", "A.png"));
-  assert.strictEqual(cfg.symbols[1].path, path.join(proj, "sfs_assets", "p", "A_2.png"));
+  // 加編號後檔名結尾是數字：放進自己的資料夾（EffectCraft 才不會接成連續圖檔）
+  assert.strictEqual(cfg.symbols[1].path, path.join(proj, "sfs_assets", "p", "A_2", "A_2.png"));
   assert.ok(fs.readFileSync(cfg.symbols[1].path).equals(fs.readFileSync(path.join(SYMBOL_DIR, "K.png"))));
   assert.ok(cfg.symbols.every((s) => EC.isInside(proj, s.path) && fs.existsSync(s.path)));
   // 再複製一次：同內容的檔案直接沿用
@@ -210,6 +211,32 @@ test("素材：判斷是否在專案資料夾內；--copy-assets 複製並改寫
   EC.copyAssets(EC.assetRefs(cfg).slice(0, 1), proj, "p");
   assert.strictEqual(cfg.symbols[0].path, path.join(proj, "sfs_assets", "p", "A.png"));
   assert.strictEqual(fs.readdirSync(path.join(proj, "sfs_assets", "p")).length, cfg.symbols.length, "A, A_2 (K), Q, J, WILD, SCATTER, SEVEN");
+});
+
+test("連續圖檔：EffectCraft 會把 C200.png / C400.png 接成一段；判斷、建置時警告、複製到各自的資料夾", () => {
+  const dir = path.join(tmp, "seq");
+  fs.mkdirSync(dir, { recursive: true });
+  ["C200", "C400", "C1200", "MAJOR", "MAJOR_2", "K9"].forEach((n) => fs.copyFileSync(path.join(SYMBOL_DIR, "A.png"), path.join(dir, n + ".png")));
+  deq(["C200", "C1200", "MAJOR", "MAJOR_2", "K9"].map((n) => EC.sequenceProne(path.join(dir, n + ".png"))), [true, true, false, false, false]);
+  // 模擬 EffectCraft：建置時警告哪些符號被接成連續圖檔；AE 不會
+  const names = ["C200", "C400", "C1200", "MAJOR"];
+  [true, false].forEach((flavor) => {
+    const env = ecSetup(flavor, (c) => {
+      c.symbols = names.map((n) => ({ name: n, path: path.join(dir, n + ".png"), itemId: 0, filler: true }));
+      c.startBoard = [["C200", "C400", "MAJOR"], ["C400", "C1200", "MAJOR"], ["C200", "C400", "C1200"], ["MAJOR", "C200", "C400"], ["C1200", "C200", "MAJOR"]];
+      c.endBoard = c.startBoard;
+    });
+    const out = env.S.ae.build(env.cfg, {});
+    deq(out.errors, []);
+    const warn = out.warnings.find((w) => /連續圖檔/.test(w));
+    if (flavor) assert.ok(warn && /C200, C400, C1200。/.test(warn), out.warnings.join(" | "));
+    else assert.ok(!warn, "AE honours io.sequence = false");
+  });
+  // 複製到各自的資料夾後就不會被接起來
+  const refs = names.map((n) => { const o = { p: path.join(dir, n + ".png") }; return { label: n, get: () => o.p, set: (v) => { o.p = v; } }; });
+  EC.copyAssets(refs, dir, "x");
+  deq(refs.map((r) => path.relative(dir, r.get()).split(path.sep).join("/")), ["sfs_assets/x/C200/C200.png", "sfs_assets/x/C400/C400.png", "sfs_assets/x/C1200/C1200.png", "sfs_assets/x/MAJOR.png"]);
+  assert.ok(refs.every((r) => !EC.sequenceProne(r.get())));
 });
 
 // ---------------- sfs.js ec（假的 effectcraft-cli） ----------------

@@ -37,6 +37,18 @@ const HELP = `SlotFakeSpin CLI
                                   frame frameStart frameSpeed），會關掉自動套用
   regen <preset>                  依快速節奏重新產生各輪
 
+Hold & Spin 重轉（每格各自轉、落下就鎖住、多回合；Link 系列）
+  hs-init <preset> --blank <空格符號> [--grid 3x2] [--cell 200|200x180] [--gap 20|20x10] [--spins 3] [--start-spins 3]
+  hs-init --symbols <資料夾> --out preset.json --blank <空格符號> [同上]
+                                  把設定檔改成 Hold & Spin（--grid = 欄x列），起始盤面全部是空格
+  hs-board <preset> [--start <盤面>] [--rounds <回合…|@檔案>] [--add <回合>] [--clear]
+                                  盤面一行寫完：由上到下逐列、列之間用 /，- = 空格，例如「- - 200 / - - MINI」
+                                  回合：每行一回合（命令列用 ; 分隔），開頭可加「@秒」= 這回合起轉時間（從 spin.startTime 算）
+                                    例：--rounds "@3 - 200 - / 800 - -; @6.7 800 - - / - - -; - - - / - - -"
+                                  鎖住的格子寫 - 或同一個符號；印出每回合轉幾格、鎖住哪些、剩餘次數、最後盤面
+  節奏用 set：hs.speed hs.firstStop hs.stagger hs.order=col|row|all hs.roundGap hs.antCells hs.antFrame hs.lockPulse
+             （拉回 / 加速 / 減速 / 衝過 / 回彈 / 期待多轉 spin.antTime 沿用 spin）
+
 期待感 / 連線
   suggest <preset> [--apply]      依結果盤面 + 停輪順序算出期待輪（--apply 寫入）
   lines <preset> [--detect] [--clear] [--timing] [--add 線型:連數[:顯示]]
@@ -281,9 +293,163 @@ function boardText(cfg, which) {
   return S.board.toText(which === "start" ? cfg.startBoard : cfg.endBoard, cfg.layout.rows);
 }
 
+// ---------------------------------------------------------------- Hold & Spin
+const isHS = (cfg) => cfg.mode === "holdspin";
+const indent = (t) => t.split("\n").map((l) => "  " + l).join("\n");
+
+// 只有轉輪模式才有的指令
+function reelsOnly(cfg, cmd) {
+  if (isHS(cfg)) fail(cmd + " 只用在轉輪模式。Hold & Spin 用 hs-board 設定回合、set hs.* 調節奏（set mode=reels 可改回轉輪）");
+}
+
+function parseSize(v, label) {
+  const m = /^(\d+)(?:\s*[x×]\s*(\d+))?$/i.exec(String(v));
+  if (!m) fail(label + " 格式是 200 或 200x180");
+  return [Number(m[1]), Number(m[2] || m[1])];
+}
+
+function symbolsFromDir(dir) {
+  if (!dir || dir === true || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) fail("請用 --symbols 指定符號圖檔資料夾");
+  const files = fs.readdirSync(dir).filter((f) => !f.startsWith(".") && IMAGE_RE.test(f)).sort(S.util.naturalCompare);
+  if (!files.length) fail("資料夾裡沒有圖檔：" + dir);
+  const names = [];
+  return files.map((f) => {
+    const name = S.uniqueName(S.util.baseName(f).replace(/[,\t\r\n\/|;]/g, "_"), names);
+    names.push(name);
+    return { name, path: path.resolve(dir, f), itemId: 0, filler: true };
+  });
+}
+
+// 空格顯示成 -：[欄][列] 裡的空格符號換成 ""
+const dashBlank = (board, blank) => board.map((col) => col.map((v) => (v === blank ? "" : v)));
+
+function cmdHsInit(file, opt) {
+  let cfg, out;
+  if (opt.symbols) {
+    cfg = S.defaultConfig();
+    cfg.symbols = symbolsFromDir(opt.symbols);
+    out = opt.out && opt.out !== true ? String(opt.out) : "preset.json";
+  } else {
+    if (!file) fail("用法：hs-init <preset> --blank <空格符號>，或 hs-init --symbols <資料夾> --out preset.json --blank <空格符號>");
+    cfg = load(file);
+    out = file;
+  }
+  const names = S.symbolNames(cfg), L = cfg.layout, H = cfg.hs;
+  let blank = null;
+  if (opt.blank && opt.blank !== true) {
+    blank = S.board.matchName(String(opt.blank), names);
+    if (!blank) fail("--blank 的「" + opt.blank + "」不是符號（有：" + names.join(" ") + "）");
+  } else {
+    blank = names.indexOf(H.blank) >= 0 ? H.blank : names.find((n) => /blank|empty|空/i.test(n)) || null;
+    if (!blank) fail("請用 --blank 指定空格符號（空格圖案的符號名稱；有：" + names.join(" ") + "）");
+  }
+  const wasHS = isHS(cfg), before = [L.reels, L.rows];
+  if (opt.grid && opt.grid !== true) {
+    const g = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(String(opt.grid));
+    if (!g) fail("--grid 格式是 欄x列，例如 3x2");
+    L.reels = Number(g[1]);
+    L.rows = Number(g[2]);
+  } else if (!wasHS && opt.symbols) {
+    L.reels = 5; L.rows = 3;
+  }
+  if (opt.cell) [L.cellW, L.cellH] = parseSize(opt.cell, "--cell");
+  if (opt.gap) [L.gapX, L.gapY] = parseSize(opt.gap, "--gap");
+  if (opt.spins) H.spins = Number(opt.spins);
+  if (opt["start-spins"]) H.startSpins = Number(opt["start-spins"]);
+  else if (opt.spins || !wasHS) H.startSpins = H.spins;
+  cfg.mode = "holdspin";
+  H.blank = blank;
+  if (!wasHS || before[0] !== L.reels || before[1] !== L.rows) {
+    cfg.startBoard = S.board.create(L.reels, L.rows, blank);
+    H.rounds = "";
+  }
+  cfg.lines = [];
+  const norm = S.normalizeConfig(cfg);
+  norm.endBoard = S.util.clone(norm.startBoard);
+  save(out, norm);
+  const N = norm.layout;
+  console.log("已" + (opt.symbols ? "建立 " + out + "（" + names.length + " 個符號：" + names.join(", ") + "）" : "把 " + out + " 改成") + " Hold & Spin：" +
+    N.reels + " 欄 × " + N.rows + " 列，格子 " + N.cellW + "x" + N.cellH + "，間距 " + N.gapX + "x" + N.gapY + "，空格符號 " + blank +
+    "，次數 " + norm.hs.spins + "（開始剩 " + norm.hs.startSpins + "）");
+  console.log("下一步：hs-board 設定起始盤面（一開始就鎖住的符號）和每回合落下的符號 → check → render");
+}
+
+// --rounds / --add：@檔案 = 讀檔；否則 ; 分隔回合（不像盤面把 / 換成換行：/ 是回合裡的換列）
+function roundsArg(v) {
+  if (v === undefined || v === true) return null;
+  const s = String(v);
+  if (s.startsWith("@") && fs.existsSync(s.slice(1))) return fs.readFileSync(s.slice(1), "utf8");
+  return s.replace(/\s*;\s*/g, "\n");
+}
+
+function cmdHsBoard(file, opt) {
+  const cfg = load(file);
+  if (!isHS(cfg)) fail("這個設定檔不是 Hold & Spin，先用 hs-init 轉換");
+  const L = cfg.layout, H = cfg.hs, names = S.symbolNames(cfg);
+  const hint = "\n可用符號：" + names.join(" ") + "（- = 空格 " + H.blank + "）";
+  const start = textArg(opt.start);
+  if (start !== null) {
+    const res = S.hs.parseBoard(start, L.reels, L.rows, names, H.blank);
+    if (res.errors.length) fail("起始盤面：\n  " + res.errors.join("\n  ") + hint);
+    cfg.startBoard = res.board.map((col) => col.map((v) => v || H.blank));
+  }
+  if (opt.clear) H.rounds = "";
+  const r = roundsArg(opt.rounds);
+  if (r !== null) H.rounds = r;
+  const add = roundsArg(opt.add);
+  if (add !== null) H.rounds = (H.rounds.trim() ? H.rounds.trim() + "\n" : "") + add;
+  const parsed = S.hs.parseRounds(cfg);
+  if (parsed.errors.length) fail("回合：\n  " + parsed.errors.join("\n  ") + hint);
+  H.rounds = S.hs.roundsText(parsed.rounds, L.rows);
+  const sim = S.hs.apply(cfg);
+  if (sim.errors.length && parsed.rounds.length) fail(sim.errors.join("\n"));
+  if (!parsed.rounds.length) cfg.endBoard = S.util.clone(cfg.startBoard);
+  save(file, cfg);
+  printHs(cfg, sim);
+}
+
+// 起始盤面 + 每回合推演表 + 最後盤面
+function printHs(cfg, sim) {
+  const L = cfg.layout, H = cfg.hs;
+  sim = sim || S.hs.simulate(cfg);
+  console.log("起始盤面（- = 空格 " + H.blank + "，其他符號一開始就鎖住；開始剩 " + H.startSpins + " 次，落下新符號重設成 " + H.spins + " 次）：");
+  console.log(indent(S.board.toText(dashBlank(cfg.startBoard, H.blank), L.rows)));
+  const parsed = S.hs.parseRounds(cfg).rounds;
+  if (!parsed.length) { console.log("\n還沒有回合：hs-board " + "<preset> --rounds \"@3 - 200 - / 800 - -; ...\""); return; }
+  console.log("\n" + pad("回合", 6) + pad("起轉", 9) + pad("轉", 4) + pad("落下（列-欄）", 30) + "剩餘次數");
+  let left = H.startSpins;
+  sim.rounds.forEach((rd, k) => {
+    const locks = rd.spin.filter((s) => s[2]).map((s) => (s[1] + 1) + "-" + (s[0] + 1) + " " + s[2]);
+    const at = parsed[k].at !== null ? "@" + parsed[k].at : (k ? "接續" : "@0");
+    console.log(pad(String(k + 1), 6) + pad(at, 9) + pad(rd.spin.length, 4) + pad(locks.join("、") || "-", 30) +
+      left + " → " + rd.spinsLeft + (rd.locks ? " → " + rd.spinsAfter + "（重設）" : "") +
+      (rd.end === "full" ? "　全滿，結束" : rd.end === "out" ? "　次數用完，結束" : ""));
+    left = rd.spinsAfter;
+  });
+  sim.errors.forEach((e) => console.log("✗ " + e));
+  sim.warnings.forEach((w) => console.log("⚠ " + w));
+  console.log("\n最後盤面：\n" + indent(S.board.toText(sim.board, L.rows)));
+}
+
+function hsRhythmLine(cfg) {
+  const H = cfg.hs, P = cfg.spin;
+  return "節奏：轉速 " + H.speed + " 格/秒｜第一格停 " + H.firstStop + " 每格間隔 " + H.stagger + " 順序 " + H.order +
+    "｜回合間停頓 " + H.roundGap + "｜期待：轉 ≤" + H.antCells + " 格時每格多轉 " + P.antTime + " 秒、繞框 " + (H.antFrame ? "開" : "關") +
+    "｜鎖住跳動 " + H.lockPulse + "%";
+}
+
 function cmdShow(file) {
   const cfg = load(file);
   const L = cfg.layout;
+  if (isHS(cfg)) {
+    console.log("Hold & Spin " + L.reels + " 欄 × " + L.rows + " 列，格子 " + L.cellW + "x" + L.cellH + "，間距 " + L.gapX + "x" + L.gapY +
+      "，開始時間 " + cfg.spin.startTime + " 秒，位置 " + (L.position ? L.position.join(", ") : "置中"));
+    console.log("符號：" + cfg.symbols.map((s) => s.name + (s.filler ? "" : "*") + (s.scale !== 100 ? "(" + s.scale + "%)" : "")).join(" ") +
+      "   （* = 不當填充）   空格符號：" + (cfg.hs.blank || "（未設定）"));
+    console.log(hsRhythmLine(cfg) + "\n");
+    printHs(cfg);
+    return;
+  }
   console.log("盤面 " + L.reels + "x" + L.rows + "，格子 " + L.cellW + "x" + L.cellH + "，開始時間 " + cfg.spin.startTime + " 秒" +
     "，位置 " + (L.position ? L.position.join(", ") : "置中"));
   console.log("符號：" + cfg.symbols.map((s) => s.name + (s.filler ? "" : "*") + (s.scale !== 100 ? "(" + s.scale + "%)" : "")).join(" ") + "   （* = 不當填充）");
@@ -311,6 +477,7 @@ function printReels(cfg) {
 
 function cmdBoard(file, opt) {
   const cfg = load(file);
+  if (isHS(cfg)) fail("Hold & Spin 的盤面用 hs-board 設定（--start 起始盤面、--rounds 每回合）");
   const names = S.symbolNames(cfg), L = cfg.layout;
   for (const which of ["start", "end"]) {
     const t = textArg(opt[which]);
@@ -375,6 +542,16 @@ function cmdSet(file, pairs) {
   }
   const before = cfg.layout.reels;
   cfg = S.normalizeConfig(cfg);
+  if (isHS(cfg)) {
+    // Hold & Spin：改尺寸時新格子補空格；回合、最後盤面重新推演
+    if (touchedSize) cfg.startBoard.forEach((col) => col.forEach((v, y) => { if (!v) col[y] = cfg.hs.blank; }));
+    const sim = S.hs.apply(cfg);
+    save(file, cfg);
+    console.log("已更新 " + pairs.join(" "));
+    console.log(hsRhythmLine(cfg));
+    sim.errors.forEach((e) => console.log("✗ " + e));
+    return;
+  }
   if (touchedSize) {
     const pool = S.fillerPool(cfg), rng = new S.Rng(Date.now() % 2147483000 + 1);
     for (const b of [cfg.startBoard, cfg.endBoard]) b.forEach((col) => col.forEach((v, y) => { if (!v) col[y] = rng.pick(pool); }));
@@ -398,6 +575,7 @@ const REEL_KEYS = Object.keys(S.reelDefaults());
 
 function cmdReel(file, which, pairs) {
   const cfg = load(file);
+  reelsOnly(cfg, "reel");
   const n = cfg.layout.reels;
   let idx;
   if (which === "all") idx = cfg.reels.map((_, i) => i);
@@ -427,6 +605,7 @@ function cmdReel(file, which, pairs) {
 
 function cmdRegen(file) {
   const cfg = load(file);
+  reelsOnly(cfg, "regen");
   cfg.reels = S.generateReels(cfg);
   cfg.spin.autoRhythm = true;
   save(file, cfg);
@@ -436,6 +615,7 @@ function cmdRegen(file) {
 
 function cmdSuggest(file, opt) {
   const cfg = load(file);
+  reelsOnly(cfg, "suggest");
   const res = opt.apply ? S.anticipation.apply(cfg) : S.anticipation.suggest(cfg);
   res.reasons.forEach((r) => console.log(r));
   console.log("建議期待輪：" + (res.reels.length ? res.reels.join(",") : "（無）"));
@@ -448,6 +628,7 @@ function cmdSuggest(file, opt) {
 
 function cmdLines(file, opt) {
   const cfg = load(file);
+  reelsOnly(cfg, "lines");
   const L = cfg.layout;
   if (opt.clear) cfg.lines = [];
   if (opt.detect) {
@@ -504,12 +685,91 @@ function asciiTimeline(plan, width) {
   return rows.join("\n") + "\n      = 轉動  * 繞框  ~ 減速  | 停輪  . 回彈  數字 = 連線顯示";
 }
 
+// Hold & Spin 文字時間軸：每格一行
+function asciiTimelineHS(plan, width) {
+  const T0 = plan.startTime, T1 = Math.max(plan.endTime, T0 + 0.5) + 0.1;
+  const X = (t) => Math.max(0, Math.min(width - 1, Math.round((t - T0) / (T1 - T0) * (width - 1))));
+  const rows = [];
+  const head = Array(width).fill(" ");
+  plan.rounds.forEach((rd, k) => String(k + 1).split("").forEach((c, j) => { if (X(rd.start) + j < width) head[X(rd.start) + j] = c; }));
+  rows.push(pad("回合", 6) + head.join(""));
+  plan.cells.forEach((cp) => {
+    const line = Array(width).fill(" ");
+    if (cp.lockRound === 0) line.fill("#");
+    cp.spins.forEach((sp) => {
+      for (let x = X(sp.start); x <= X(sp.decelStart); x++) line[x] = "=";
+      for (let x = X(sp.decelStart); x <= X(sp.stop); x++) line[x] = "~";
+      for (let x = X(sp.stop); x <= X(sp.settle); x++) line[x] = ".";
+      if (sp.lock) for (let x = X(sp.settle) + 1; x < width; x++) line[x] = "#";
+    });
+    plan.frames.filter((f) => f.cell === cp.index).forEach((f) => {
+      for (let x = X(f.start); x <= X(f.end); x++) if (line[x] === "=" || line[x] === " ") line[x] = "*";
+    });
+    cp.spins.forEach((sp) => { line[X(sp.stop)] = "|"; });
+    rows.push(pad("C" + cp.tag, 6) + line.join(""));
+  });
+  const axis = Array(width).fill("-");
+  const labels = Array(width).fill(" ");
+  for (let s = 0; T0 + s <= T1; s += 1) {
+    const x = X(T0 + s);
+    axis[x] = "+";
+    String(s).split("").forEach((c, k) => { if (x + k < width) labels[x + k] = c; });
+  }
+  rows.push(pad("", 6) + axis.join(""));
+  rows.push(pad("秒", 6) + labels.join(""));
+  return rows.join("\n") + "\n      = 轉動  * 繞框  ~ 減速  | 停下  . 回彈  # 鎖住（格子 C列-欄）";
+}
+
+function checkHS(cfg, plan, fps, opt, all) {
+  const T0 = plan ? plan.startTime : 0;
+  if (opt.json) {
+    console.log(JSON.stringify({
+      ok: !all.length, mode: "holdspin", errors: all, warnings: plan ? plan.warnings : [], fps,
+      rounds: plan ? plan.rounds.map((rd, k) => ({ round: k + 1, start: rd.start, firstStop: rd.firstStop, settle: rd.settle,
+        cells: rd.cells.map((i) => plan.cells[i].tag), locks: rd.locks.map((i) => ({ cell: plan.cells[i].tag, symbol: plan.cells[i].final })),
+        spinsLeft: rd.spinsLeft, spinsAfter: rd.spinsAfter, end: rd.end })) : [],
+      cells: plan ? plan.cells.map((cp) => ({ cell: cp.tag, start: cp.start, final: cp.final, lockRound: cp.lockRound,
+        spins: cp.spins.map((sp) => ({ round: sp.round + 1, start: sp.start, stop: sp.stop, settle: sp.settle, result: sp.result, lock: sp.lock, ant: sp.ant, fill: sp.fill, speed: r2(sp.speed / plan.pitch) })) })) : [],
+      frames: plan ? plan.frames.map((f) => ({ cell: plan.cells[f.cell].tag, start: f.start, end: f.end })) : [],
+      markers: plan ? plan.markers.map((m) => ({ t: m.t, frame: Math.round(m.t * fps), label: m.label })) : [],
+      finalBoard: plan ? plan.board : null, allSettled: plan ? plan.allSettled : null, endTime: plan ? plan.endTime : null,
+    }, null, 2));
+    process.exit(all.length ? 1 : 0);
+  }
+  if (all.length) { console.log("✗ 有問題：\n  " + all.join("\n  ")); process.exit(1); }
+  const L = cfg.layout;
+  console.log("✓ 設定正確（Hold & Spin " + L.reels + " 欄 × " + L.rows + " 列，@" + fps + "fps，開始 " + r2(T0) + " 秒；以下時間從開始算）");
+  plan.warnings.forEach((w) => console.log("⚠ " + w));
+  console.log("\n" + pad("回合", 6) + pad("起轉", 7) + pad("第一格停", 10) + pad("停妥", 7) + pad("轉", 4) + pad("鎖住（列-欄）", 26) + "剩餘次數");
+  let left = cfg.hs.startSpins;
+  plan.rounds.forEach((rd, k) => {
+    const locks = rd.locks.map((i) => plan.cells[i].tag + " " + plan.cells[i].final).join("、") || "-";
+    console.log(pad(String(k + 1) + (rd.ant ? "*" : ""), 6) + pad(r2(rd.start - T0), 7) + pad(r2(rd.firstStop - T0), 10) + pad(r2(rd.settle - T0), 7) +
+      pad(rd.cells.length, 4) + pad(locks, 26) + left + " → " + rd.spinsLeft + (rd.locks.length ? " → " + rd.spinsAfter : "") +
+      (rd.end === "full" ? "　全滿" : rd.end === "out" ? "　用完" : ""));
+    left = rd.spinsAfter;
+  });
+  console.log("（* = 期待回合：轉的格子 ≤ " + cfg.hs.antCells + " 格，每格多轉 " + cfg.spin.antTime + " 秒）");
+  console.log("\n各格每次停下（列-欄；🔒 = 落下鎖住）：");
+  plan.cells.forEach((cp) => {
+    const parts = cp.lockRound === 0 ? ["一開始就鎖住 " + cp.start] :
+      cp.spins.map((sp) => "R" + (sp.round + 1) + " " + r2(sp.stop - T0) + "s " + sp.result + (sp.lock ? " 🔒" : "") + "（" + sp.fill + " 格 " + r2(sp.speed / plan.pitch) + " 格/秒）");
+    console.log("  " + pad(cp.tag, 5) + parts.join("　"));
+  });
+  console.log("\n最後盤面：\n" + indent(S.board.toText(plan.board, L.rows)));
+  console.log("全部停妥 " + r2(plan.allSettled - T0) + " 秒，演出結束 " + r2(plan.endTime - T0) + " 秒");
+  console.log("\n" + asciiTimelineHS(plan, 64));
+  console.log("\n標記（目標合成時間，可對音效）：");
+  plan.markers.forEach((m) => console.log("  " + pad(r2(m.t).toFixed(2) + "s", 8) + pad("f" + Math.round(m.t * fps), 7) + m.label));
+}
+
 function cmdCheck(file, opt) {
   const cfg = load(file);
   const fps = Number(opt.fps || cfg.layout.newCompFps || 30);
   const errors = S.validateConfig(cfg);
   const plan = errors.length ? null : S.computePlan(cfg, fps);
   const all = errors.concat(plan ? plan.errors : []);
+  if (isHS(cfg)) return checkHS(cfg, plan, fps, opt, all);
   if (opt.json) {
     console.log(JSON.stringify({
       ok: !all.length, errors: all, warnings: plan ? plan.warnings : [], fps,
@@ -538,15 +798,51 @@ function cmdCheck(file, opt) {
 }
 
 // ---------------------------------------------------------------- 預覽
+// 繞框外框（預覽用）：轉輪的框住整輪；Hold & Spin 的框住一格
+function frameOverlays(plan, F, L, t) {
+  const cy = plan.margin + plan.reelH / 2;
+  return plan.frames.filter((f) => t >= f.start && t <= f.end + F.fade).map((f) => {
+    let a = 1;
+    if (F.fade > 0) a = Math.min(1, (t - f.start) / F.fade, (f.end + F.fade - t) / F.fade);
+    return { cx: f.x, cy: f.y !== undefined ? f.y : cy, w: f.w || L.cellW + 2 * F.pad, h: f.h || plan.reelH + 2 * F.pad,
+      color: F.source === "custom" ? "#FFFFFF" : F.color, width: F.width, alpha: Math.max(0, a), phase: (t * F.laps) % 1, runner: F.runner / 100 };
+  });
+}
+
+// Hold & Spin 的預覽場景：每格一個 1 格高的視窗；鎖住跳動和 AE 相同（0.1 秒放大、0.22 秒縮回）
+function sceneForHS(cfg, plan, fps, shots, outScale) {
+  const L = cfg.layout, F = cfg.frame, H = cfg.hs;
+  const symbols = {};
+  cfg.symbols.forEach((s) => { symbols[s.name] = s.path; });
+  const shutter = cfg.spin.motionBlur ? cfg.spin.shutterAngle / 360 / fps : 0;
+  const samples = shutter > 0 ? 8 : 1;
+  const up = S.hs.PULSE_UP, down = S.hs.PULSE_DOWN, big = H.lockPulse / 100;
+  const frames = shots.map(({ t, label }) => {
+    const cells = plan.cells.map((cp) => {
+      const ys = [];
+      for (let s = 0; s < samples; s++) ys.push(cp.keys.length ? S.evalKeys(cp.keys, samples > 1 ? t - shutter / 2 + shutter * (s + 0.5) / samples : t) : cp.startY);
+      return ys;
+    });
+    const wins = plan.pulses.filter((p) => t >= p.t && t < p.t + up + down).map((p) => {
+      const dt = t - p.t;
+      return { cx: p.x, cy: p.y, name: p.name, scale: dt < up ? 1 + (big - 1) * dt / up : big - (big - 1) * (dt - up) / down };
+    });
+    return { t, label, reels: [], cells, frames: frameOverlays(plan, F, L, t), wins, lines: [] };
+  });
+  return { width: plan.boardW, height: plan.boardH, margin: plan.margin, reelW: L.cellW, reelH: L.cellH, cellW: L.cellW, cellH: L.cellH,
+    pitch: plan.pitch, scaleMode: L.scaleMode, symbolScale: L.symbolScale, symbolScales: S.symbolScales(cfg), symbols, fps, outScale: outScale || 1,
+    reels: [], cells: plan.cells.map((cp) => ({ x: cp.x, y: cp.y, strip: cp.strip.map((s) => s.name) })), frames, plan };
+}
+
 function sceneFor(cfg, fps, shots, outScale) {
   const plan = S.computePlan(cfg, fps);
   if (plan.errors.length) fail(plan.errors.join("\n"));
+  if (isHS(cfg)) return sceneForHS(cfg, plan, fps, shots, outScale);
   const L = cfg.layout, F = cfg.frame, LS = cfg.lineStyle;
   const symbols = {};
   cfg.symbols.forEach((s) => { symbols[s.name] = s.path; });
   const shutter = cfg.spin.motionBlur ? cfg.spin.shutterAngle / 360 / fps : 0;
   const samples = shutter > 0 ? 8 : 1;
-  const cy = plan.margin + plan.reelH / 2;
   // 中獎符號跳動（與 AE 相同：0.1 秒放大、0.22 秒縮回）
   const winCells = {};
   plan.lines.forEach((pl) => pl.cells.forEach((c) => {
@@ -559,12 +855,7 @@ function sceneFor(cfg, fps, shots, outScale) {
       for (let s = 0; s < samples; s++) ys.push(S.evalKeys(rp.keys, samples > 1 ? t - shutter / 2 + shutter * (s + 0.5) / samples : t));
       return ys;
     });
-    const frameOv = plan.frames.filter((f) => t >= f.start && t <= f.end + F.fade).map((f) => {
-      let a = 1;
-      if (F.fade > 0) a = Math.min(1, (t - f.start) / F.fade, (f.end + F.fade - t) / F.fade);
-      return { cx: f.x, cy, w: L.cellW + 2 * F.pad, h: plan.reelH + 2 * F.pad, color: F.source === "custom" ? "#FFFFFF" : F.color,
-        width: F.width, alpha: Math.max(0, a), phase: (t * F.laps) % 1, runner: F.runner / 100 };
-    });
+    const frameOv = frameOverlays(plan, F, L, t);
     const wins = [];
     if (LS.pulse > 100) {
       Object.values(winCells).forEach((w) => {
@@ -591,6 +882,7 @@ function sceneFor(cfg, fps, shots, outScale) {
 }
 
 function keyShots(plan) {
+  if (plan.mode === "holdspin") return S.hs.shots(plan);
   const shots = [];
   plan.markers.forEach((m) => {
     if (/^LINE /.test(m.label)) return;
@@ -644,8 +936,11 @@ function cmdRender(file, opt) {
   const wantAny = opt.gif || opt.sheet || opt.boards;
   if (opt.boards || !wantAny) {
     const out = opt.boards && opt.boards !== true ? opt.boards : base + "_boards.png";
-    const sc = sceneFor(cfg, fps, [{ t: plan.startTime - 0.001, label: "START" }, { t: plan.allSettled + 0.001, label: "RESULT" }], scale);
-    runRender(["scene", tmpJson("boards", sc), "sheet", out, "2"]);
+    // Hold & Spin：開始 + 每回合停妥後的盤面
+    const shots = [{ t: plan.startTime - 0.001, label: "START" }].concat(isHS(cfg) ?
+      plan.rounds.map((rd, k) => ({ t: rd.settle + 0.001, label: "ROUND " + (k + 1) + (rd.full ? " FULL" : rd.end === "out" ? " END" : "") })) :
+      [{ t: plan.allSettled + 0.001, label: "RESULT" }]);
+    runRender(["scene", tmpJson("boards", sceneFor(cfg, fps, shots, scale)), "sheet", out, String(Math.min(shots.length, isHS(cfg) ? 3 : 2))]);
   }
   if (opt.sheet || !wantAny) {
     const out = opt.sheet && opt.sheet !== true ? opt.sheet : base + "_keys.png";
@@ -768,6 +1063,7 @@ function cmdAE(file, opt) {
   console.log("全部停妥 " + r2(res.allSettled) + " 秒，演出結束 " + r2(res.endTime) + " 秒");
   console.log("標記：");
   res.markers.forEach((m) => console.log("  " + pad(r2(m.t).toFixed(2) + "s", 8) + pad("f" + m.frame, 7) + m.label));
+  require("./ec.js").printRounds(res);
   if (res.frames.length) {
     // saveFrameToPng 可能是非同步的：等檔案出現
     const t1 = Date.now();
@@ -785,6 +1081,8 @@ function main() {
   switch (cmd) {
     case "init": return cmdInit(opt);
     case "from-psd": return cmdFromPsd(pos[0], opt);
+    case "hs-init": return cmdHsInit(pos[0], opt);
+    case "hs-board": return cmdHsBoard(pos[0], opt);
     case "show": return cmdShow(pos[0]);
     case "board": return cmdBoard(pos[0], opt);
     case "symbol": return cmdSymbol(pos[0], pos[1], opt);
@@ -804,4 +1102,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { sceneFor, keyShots, asciiTimeline };
+module.exports = { sceneFor, keyShots, asciiTimeline, asciiTimelineHS };

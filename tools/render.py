@@ -7,6 +7,7 @@ SlotFakeSpin 預覽繪製（需要 Pillow：pip install pillow）
   render.py scene   <scene.json> sheet <out.png> [欄數]  關鍵畫面總覽（每格標時間 / 事件）
 
 scene.json 由 tools/sfs.js 產生（關鍵影格用和 AE 相同的 Bezier 計算）。這只是預覽，最終以 AE 為準。
+Hold & Spin（mode = holdspin）的場景用 cells（每格一個視窗）取代 reels。
 """
 import json
 import math
@@ -177,6 +178,13 @@ def render_frame(sc, syms, fr):
             win = reel_window(sc, syms, reel["strip"], y).convert("RGB")
             acc = win if acc is None else Image.blend(acc, win, 1.0 / (si + 1))
         img.paste(acc, (int(round(reel["x"] - sc["reelW"] / 2)), sc["margin"]))
+    # Hold & Spin：每格一個 1 格高的視窗（reelW × reelH = 格子大小），以格子中心貼上
+    for ci, cell in enumerate(sc.get("cells", [])):
+        acc = None
+        for si, y in enumerate(fr["cells"][ci]):
+            win = reel_window(sc, syms, cell["strip"], y).convert("RGB")
+            acc = win if acc is None else Image.blend(acc, win, 1.0 / (si + 1))
+        img.paste(acc, (int(round(cell["x"] - sc["reelW"] / 2)), int(round(cell["y"] - sc["reelH"] / 2))))
     for fo in fr["frames"]:
         draw_frame(img, fo)
     for w in fr["wins"]:
