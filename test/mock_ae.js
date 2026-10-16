@@ -2,6 +2,10 @@
  * 極簡 After Effects DOM 模擬，只實作 SlotFakeSpin 用到的部分。
  * 目的：在 Node 裡跑完整建置流程，並用 Bezier 計算關鍵影格內插，驗證盤面正確。
  * 盡量模仿 AE 會丟錯的行為（例如有關鍵影格時 setValue、影響值超出範圍）。
+ *
+ * opts.effectcraft = true 模擬 EffectCraft 0.3.1：app.version 帶 EffectCraft、app.run 指令（shape.newPath）、
+ * 不能 addProperty("ADBE Vector Shape - Group")、合成名稱和既有項目重複時自動改名（"X1" → "X 2"）。
+ * opts.effectcraft = "nopath"：另外讓 shape.newPath 失敗。
  */
 "use strict";
 const fs = require("fs");
@@ -11,6 +15,7 @@ function install(globalObj, opts) {
   opts = opts || {};
   const g = globalObj;
   const imageSizes = opts.imageSizes || {};
+  const ec = !!opts.effectcraft;
 
   class Collection {
     constructor() { this._arr = []; }
@@ -249,14 +254,48 @@ function install(globalObj, opts) {
         check();
         const ok = node.accepts === "vector" ? VECTOR_ITEMS : node.accepts === "effect" ? EFFECTS : [];
         if (ok.indexOf(mn) < 0) throw new Error("mock: cannot add " + mn + " to " + node.matchName);
+        if (ec && mn === "ADBE Vector Shape - Group") throw new Error("invalid parameters for layer.addShapeItem: unknown kind path");
         const ch = makeNode(mn);
         ch.parent = node;
         node.gen++;
         node.children.push(ch);
         return wrap(ch);
       },
+      remove() {
+        check();
+        const p = node.parent;
+        p.children.splice(p.children.indexOf(node), 1);
+        p.gen++;
+      },
       _node: node,
     };
+  }
+
+  // EffectCraft 的 shape.newPath：在圖層內容最上面加一個群組（路徑 + 筆畫）
+  let shapeCount = 0;
+  function ecNewPath(params) {
+    if (opts.effectcraft === "nopath") throw new Error("unknown command shape.newPath");
+    const comp = g.app.project._items.find((it) => it.id === params.comp);
+    const layer = comp && comp._layers.find((l) => l.id === params.layer);
+    if (!layer || !layer._contents) throw new Error("shape.newPath: no shape layer " + params.comp + "/" + params.layer);
+    if (!Array.isArray(params.vertices) || params.vertices.length < 2 || params.vertices.some((v) => !Array.isArray(v) || v.length !== 2)) {
+      throw new Error("shape.newPath: bad vertices");
+    }
+    const grp = makeNode("ADBE Vector Group");
+    grp.name = "Shape " + (++shapeCount);
+    const contents = grp.children[0];
+    const pathNode = makeNode("ADBE Vector Shape - Group");
+    const sh = new Shape();
+    sh.vertices = params.vertices.map((v) => v.slice());
+    sh.closed = !!params.closed;
+    pathNode.children[0].prop.value = sh;
+    [pathNode, makeNode("ADBE Vector Graphic - Stroke")].forEach((ch) => { ch.parent = contents; contents.children.push(ch); });
+    const root = layer._contents;
+    grp.parent = root;
+    root.children.unshift(grp);
+    root.gen++;
+    (g.app.__runs = g.app.__runs || []).push({ id: "shape.newPath", params });
+    return { group: 1, layer: layer.id, path: 2 };
   }
 
   // ---------------- Items ----------------
@@ -333,8 +372,10 @@ function install(globalObj, opts) {
     }
   }
 
+  let nextLayerId = 1;
   class Layer {
     constructor(comp, source) {
+      this.id = nextLayerId++;
       this.containingComp = comp; this.source = source; this._name = source ? source.name : "Layer";
       this.parent = null; this.comment = ""; this.label = 0; this.shy = false; this.motionBlur = false;
       this.nullLayer = false; this.selected = false; this.startTime = 0; this.inPoint = 0;
@@ -393,12 +434,19 @@ function install(globalObj, opts) {
       this.activeItem = null;
       const self = this;
       const coll = new Collection();
-      coll.addComp = (name, w, h, par, dur, fps) => self._add(new CompItem(self, name, w, h, par, dur, fps));
+      coll.addComp = (name, w, h, par, dur, fps) => self._add(new CompItem(self, ec ? self._ecName(name) : name, w, h, par, dur, fps));
       coll.addFolder = (name) => self._add(new FolderItem(self, name));
       Object.defineProperty(coll, "_arr", { get: () => self._items });
       this.items = indexable(coll);
     }
     _add(it) { this._items.push(it); return it; }
+    // EffectCraft：合成名稱和任何既有項目重複時改名，結尾數字換成「空格 + 2、3…」（"SFS_Board_01" → "SFS_Board_ 2"）
+    _ecName(name) {
+      const taken = (n) => this._items.some((it) => it.name === n);
+      if (!taken(name)) return name;
+      const base = name.replace(/\d+$/, "");
+      for (let n = 2; ; n++) if (!taken(base + " " + n)) return base + " " + n;
+    }
     _remove(it) {
       const i = this._items.indexOf(it); if (i >= 0) this._items.splice(i, 1);
       if (this.activeItem === it) this.activeItem = null;
@@ -435,11 +483,21 @@ function install(globalObj, opts) {
     },
     preferences: { getPrefAsLong: () => 1 },
   };
+  if (ec) {
+    app.version = "26.0 (EffectCraft 0.3.1)";
+    app.run = (id, params) => {
+      if (id === "shape.newPath") return ecNewPath(params || {});
+      throw new Error("unknown command " + id);
+    };
+  } else {
+    app.version = "25.0x1";
+  }
 
   Object.assign(g, {
     app, File, Folder, CompItem, FootageItem, FolderItem, AVItem, Layer, Property, Shape,
     KeyframeEase, KeyframeInterpolationType, MarkerValue, ImportOptions, ImportAsType,
     alert: (m) => { (g.__alerts = g.__alerts || []).push(String(m)); },
+    writeLn: (m) => { (g.__output = g.__output || []).push(String(m)); },
     confirm: () => (g.__confirm === undefined ? true : g.__confirm),
     prompt: (m, d) => (g.__prompt === undefined ? d : g.__prompt),
     $: { os: "Windows 10" },

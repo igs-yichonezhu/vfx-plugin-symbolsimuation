@@ -1354,6 +1354,8 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         "\u7121\u6CD5\u628A\u8A2D\u5B9A\u5BEB\u5165\u5408\u6210\u8A3B\u89E3\uFF0C\u4E4B\u5F8C\u5C07\u4E0D\u80FD\u300C\u8B80\u53D6\u9078\u53D6\u76E4\u9762\u300D": "Couldn't save the settings in the comp comment, so \"Load Selected Board\" won't work for it",
         "\u5EFA\u7ACB\u6642\u767C\u751F\u932F\u8AA4\uFF1A{0}{1}": "Build error: {0}{1}",
         "\uFF08line {0}\uFF09": " (line {0})",
+        "shape.newPath \u6C92\u6709\u5EFA\u7ACB\u7FA4\u7D44": "shape.newPath didn't create a group",
+        "EffectCraft \u756B\u4E0D\u51FA\u9023\u7DDA\u8DEF\u5F91\uFF0C\u5DF2\u7565\u904E\u7B2C {0} \u689D\u9023\u7DDA\u7684\u756B\u7DDA\uFF08\u6846\u683C\u5B50\u3001\u7B26\u865F\u8DF3\u52D5\u7167\u5E38\uFF09\uFF1A{1}": "EffectCraft couldn't draw the line path, so the line drawing was skipped for line {0} (boxes and symbol pulses still work): {1}",
 
         "\uFF1B\u7A7A\u767D = \u81EA\u52D5\u914D\u8272": "; empty = automatic color",
         "\u9078\u8272": "Pick",
@@ -1617,6 +1619,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         "\u5DF2\u53D6\u6D88": "Cancelled",
         "\u627E\u4E0D\u5230\u5408\u6210\u300C{0}\u300D": "Composition \"{0}\" not found",
         "\u5728\u5408\u6210\u300C{0}\u300D\u88E1\u627E\u4E0D\u5230\u8981\u66F4\u65B0\u7684\u76E4\u9762\u5716\u5C64": "No board layer to update in composition \"{0}\"",
+        "\u7121\u6CD5\u8A2D\u5B9A\u76E4\u9762\u4F4D\u7F6E\uFF08\u4F4D\u7F6E\u6709\u95DC\u9375\u5F71\u683C\uFF1F\uFF09\uFF1A{0}": "Couldn't set the board position (does Position have keyframes?): {0}",
         "SlotFakeSpin\uFF1A\u5B8C\u6210 {0}\uFF08\u5168\u90E8\u505C\u59A5 {1} \u79D2\uFF09{2}": "SlotFakeSpin: built {0} (all settled at {1} s){2}",
         "Error: \u5DF2\u53D6\u6D88": "Error: Cancelled"
     };
@@ -1651,6 +1654,14 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
     A.initLang = function (override) {
         S.lang = S.detectLang(override === "zh" || override === "en" ? override : A.langPref());
         return S.lang;
+    };
+
+    A.isEffectCraft = function () {
+        try {
+            return /EffectCraft/i.test(String(app.version)) && typeof app.run === "function";
+        } catch (e) {
+            return false;
+        }
     };
 
     A.activeComp = function () {
@@ -1995,8 +2006,21 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         p.property("ADBE Vector Shape").setValue(sh);
     }
 
+    function addPathGroupEC(lyr, group, points) {
+        app.run("shape.newPath", { comp: lyr.containingComp.id, layer: lyr.id, vertices: points, closed: false, fill: false, space: "layer" });
+        var root = lyr.property("ADBE Root Vectors Group");
+        if (root.numProperties !== 1) { throw new Error(T("shape.newPath \u6C92\u6709\u5EFA\u7ACB\u7FA4\u7D44")); }
+        root.property(1).name = group;
+        if (!vecs(lyr, group).property("ADBE Vector Graphic - Stroke")) {
+            vecs(lyr, group).addProperty("ADBE Vector Graphic - Stroke");
+        }
+    }
+
     function addStroke(lyr, group, rgb, width) {
-        var st = vecs(lyr, group).addProperty("ADBE Vector Graphic - Stroke");
+        styleStroke(vecs(lyr, group).addProperty("ADBE Vector Graphic - Stroke"), rgb, width);
+    }
+
+    function styleStroke(st, rgb, width) {
         st.property("ADBE Vector Stroke Color").setValue([rgb[0], rgb[1], rgb[2], 1]);
         st.property("ADBE Vector Stroke Width").setValue(width);
         try {
@@ -2079,11 +2103,25 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         return lyr;
     }
 
-    function buildLine(board, pl, cfg, plan, cellAsset) {
+    function buildLine(board, pl, cfg, plan, cellAsset, host) {
         var L = cfg.layout, LS = cfg.lineStyle, i, k;
         var lyr = newShapeLayer(board, (pl.highlight ? "Highlight " : "Line ") + (pl.index + 1));
         var hasPath = pl.points.length >= 2;
-        if (hasPath) {
+        if (hasPath && host.ec) {
+            try {
+                addPathGroupEC(lyr, "Line", pl.points);
+                styleStroke(vecs(lyr, "Line").property("ADBE Vector Graphic - Stroke"), pl.color, Math.max(1, LS.width));
+                addTrim(lyr, "Line");
+            } catch (eEC) {
+
+                host.pathErrors.push({ line: pl.index + 1, error: eEC.toString() });
+                try {
+                    var root = lyr.property("ADBE Root Vectors Group");
+                    for (i = root.numProperties; i >= 1; i--) { root.property(i).remove(); }
+                } catch (eRm) {  }
+                hasPath = false;
+            }
+        } else if (hasPath) {
             addGroup(lyr, "Line");
             addPath(lyr, "Line", pl.points);
             addStroke(lyr, "Line", pl.color, Math.max(1, LS.width));
@@ -2254,6 +2292,8 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         var plan = S.computePlan(cfg, fps, { timeOffset: offset });
         if (plan.errors.length) { result.errors = plan.errors; return result; }
         result.warnings = result.warnings.concat(plan.warnings);
+        var host = { ec: A.isEffectCraft(), pathErrors: [] };
+        var mb = !!cfg.spin.motionBlur;
 
         app.beginUndoGroup(update ? T("SlotFakeSpin \u66F4\u65B0\u76E4\u9762") : T("SlotFakeSpin \u5EFA\u7ACB\u5047\u8F49"));
         try {
@@ -2306,13 +2346,20 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 if (boardComp.duration < duration) { boardComp.duration = duration; }
                 duration = boardComp.duration;
             } else {
+
                 var baseName = uniqueProjectName("SFS_Board");
+                boardComp = app.project.items.addComp(baseName, plan.boardW, plan.boardH, 1, duration, fps);
                 folder = app.project.items.addFolder(baseName);
                 folder.parentFolder = root;
-                boardComp = app.project.items.addComp(baseName, plan.boardW, plan.boardH, 1, duration, fps);
                 boardComp.parentFolder = folder;
             }
-            boardComp.motionBlur = !!cfg.spin.motionBlur;
+            boardComp.motionBlur = mb;
+            if (host.ec) {
+                try {
+                    boardComp.shutterAngle = Math.round(U.clamp(cfg.spin.shutterAngle, 0, 720));
+                    boardComp.shutterPhase = -Math.round(boardComp.shutterAngle / 2);
+                } catch (eSh) {  }
+            }
 
             for (i = plan.reels.length - 1; i >= 0; i--) {
                 var rp = plan.reels[i];
@@ -2323,14 +2370,25 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 var rl = boardComp.layers.add(rc);
                 rl.name = "Reel " + (rp.index + 1);
                 rl.transform.position.setValue([rp.x, plan.margin + plan.reelH / 2]);
+
+                if (host.ec) { rl.motionBlur = mb; }
             }
             for (i = 0; i < plan.frames.length; i++) { buildFrame(boardComp, plan.frames[i], cfg, plan, frameAsset); }
             buildWinOverlays(boardComp, plan, cfg, map);
-            for (i = 0; i < plan.lines.length; i++) { buildLine(boardComp, plan.lines[i], cfg, plan, cellAsset); }
+            for (i = 0; i < plan.lines.length; i++) { buildLine(boardComp, plan.lines[i], cfg, plan, cellAsset, host); }
+            if (host.pathErrors.length) {
+                var skipped = [];
+                for (i = 0; i < host.pathErrors.length; i++) { skipped.push(host.pathErrors[i].line); }
+                result.warnings.push(T("EffectCraft \u756B\u4E0D\u51FA\u9023\u7DDA\u8DEF\u5F91\uFF0C\u5DF2\u7565\u904E\u7B2C {0} \u689D\u9023\u7DDA\u7684\u756B\u7DDA\uFF08\u6846\u683C\u5B50\u3001\u7B26\u865F\u8DF3\u52D5\u7167\u5E38\uFF09\uFF1A{1}", skipped.join(T("\u3001")), host.pathErrors[0].error));
+            }
 
             if (!boardLayer) {
                 boardLayer = target.layers.add(boardComp);
                 boardLayer.transform.position.setValue([target.width / 2, target.height / 2]);
+            }
+            if (host.ec) {
+                boardLayer.motionBlur = mb;
+                if (mb) { target.motionBlur = true; }
             }
             boardLayer.comment = S.TAG;
             removeOldMarkers(boardLayer);
@@ -2425,7 +2483,8 @@ try {
         if (!pf) { throw new Error(T("\u5DF2\u53D6\u6D88")); }
         job = { preset: pf.fsName, mode: "auto" };
     }
-    var cfg = SFS.absolutizePaths(SFS.normalizeConfig(SFS.json.parse(readText(job.preset))), new File(job.preset).parent.fsName);
+    var cfg = job.config ? SFS.absolutizePaths(SFS.normalizeConfig(job.config), job.base || "") :
+        SFS.absolutizePaths(SFS.normalizeConfig(SFS.json.parse(readText(job.preset))), new File(job.preset).parent.fsName);
     var target = job.comp ? SFS.ae.findComp(job.comp) : SFS.ae.activeComp();
     if (job.comp && !target) { throw new Error(T("\u627E\u4E0D\u5230\u5408\u6210\u300C{0}\u300D", job.comp)); }
     var mode = job.mode || "auto";
@@ -2442,7 +2501,16 @@ try {
         result.ok = true;
         result.mode = boardLayer ? "update" : "new";
         result.target = res.target.name;
+        result.targetSize = [res.target.width, res.target.height];
+        result.targetDuration = res.target.duration;
+        result.fps = res.plan.fps;
         result.board = res.boardComp.name;
+        if (job.position) {
+            try { res.boardLayer.transform.position.setValue([Number(job.position[0]), Number(job.position[1])]); }
+            catch (ePos) { result.warnings.push(T("\u7121\u6CD5\u8A2D\u5B9A\u76E4\u9762\u4F4D\u7F6E\uFF08\u4F4D\u7F6E\u6709\u95DC\u9375\u5F71\u683C\uFF1F\uFF09\uFF1A{0}", ePos.toString())); }
+        }
+        var pos = res.boardLayer.transform.position.value;
+        result.position = [pos[0], pos[1]];
         result.startTime = res.plan.startTime + offset;
         result.allSettled = res.plan.allSettled + offset;
         result.endTime = res.plan.endTime + offset;
@@ -2456,8 +2524,9 @@ try {
         else if (job.frames && job.frames.length && typeof job.frames !== "string") {
             for (i = 0; i < job.frames.length; i++) { shots.push({ t: Number(job.frames[i]), label: "T" + job.frames[i] }); }
         }
+        result.shots = shots;
         var framesDir = job.framesDir || (job.result ? new File(job.result).parent.fsName + "/frames" : "");
-        if (shots.length && framesDir) {
+        if (shots.length && framesDir && !job.print) {
             var ex = SFS.ae.exportFrames(res.target, shots, new Folder(framesDir));
             result.frames = ex.files;
             if (ex.error) { result.warnings.push(ex.error); }
@@ -2468,6 +2537,7 @@ try {
 }
 
 writeResult();
+if (job && job.print && typeof writeLn === "function") { writeLn("SFS_RESULT " + SFS.json.stringify(result)); }
 if (interactive) {
     if (result.ok) {
         alert(T("SlotFakeSpin\uFF1A\u5B8C\u6210 {0}\uFF08\u5168\u90E8\u505C\u59A5 {1} \u79D2\uFF09{2}", result.board, Math.round(result.allSettled * 100) / 100, result.warnings.length ? "\n" + result.warnings.join("\n") : ""), "SlotFakeSpin");

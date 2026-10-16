@@ -68,6 +68,8 @@
         "無法把設定寫入合成註解，之後將不能「讀取選取盤面」": "Couldn't save the settings in the comp comment, so \"Load Selected Board\" won't work for it",
         "建立時發生錯誤：{0}{1}": "Build error: {0}{1}",
         "（line {0}）": " (line {0})",
+        "shape.newPath 沒有建立群組": "shape.newPath didn't create a group",
+        "EffectCraft 畫不出連線路徑，已略過第 {0} 條連線的畫線（框格子、符號跳動照常）：{1}": "EffectCraft couldn't draw the line path, so the line drawing was skipped for line {0} (boxes and symbol pulses still work): {1}",
         // ui.js
         "；空白 = 自動配色": "; empty = automatic color",
         "選色": "Pick",
@@ -331,6 +333,7 @@
         "已取消": "Cancelled",
         "找不到合成「{0}」": "Composition \"{0}\" not found",
         "在合成「{0}」裡找不到要更新的盤面圖層": "No board layer to update in composition \"{0}\"",
+        "無法設定盤面位置（位置有關鍵影格？）：{0}": "Couldn't set the board position (does Position have keyframes?): {0}",
         "SlotFakeSpin：完成 {0}（全部停妥 {1} 秒）{2}": "SlotFakeSpin: built {0} (all settled at {1} s){2}",
         "Error: 已取消": "Error: Cancelled"
     };

@@ -1,6 +1,6 @@
 ---
 name: slot-fake-spin
-description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線，或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好。
+description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線，或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好（沒有 AE 時用 EffectCraft 建出盤面、檢查畫面與影片）。
 ---
 
 # SlotFakeSpin：老虎機假轉
@@ -68,6 +68,17 @@ node tools/sfs.js ae P --comp "<合成名稱>" --out work/<案子>/ae
 - 預設 `--mode auto`：合成裡已有一個盤面就更新它（保留圖層位置和使用者加的特效），沒有就新建。
 - 失敗時看錯誤訊息，常見原因與處理在 [cli.md](reference/cli.md)「AE 端需求」。
 - 成功後用 Read 看回傳的 2~3 張 AE 實際畫面（例如 SPINNING、最後一輪停輪、LINE 1），確認和預覽一致。
+
+**沒有 AE 時用 EffectCraft 預覽**（開源的 AE 相容合成器；開發人員沒開 AE、或想先看實際算圖時）：
+```
+node tools/sfs.js ec P --project work/<案子>/<專案>.ecproj --comp "<合成名稱>" [--pos x,y] --render work/<案子>/preview.mp4 --out work/<案子>/ec
+```
+- 跑的是同一份套用腳本，盤面結構、轉輪關鍵影格和 AE 一致；`--mode` / `--board` 用法同 `ae`。
+- 專案不存在就建新的（盤面放進新的 `SFS_Main_01`）；存在時預設改寫原檔（備份在 `--out` 的 `before.ecproj`），不想動原檔就加 `--save-as`。
+- 盤面預設放目標合成中央，要對齊背景上的盤面位置用 `--pos x,y`（盤面中心的合成座標）。
+- 符號圖要在 .ecproj 所在資料夾裡（建議整個案子放 `work/<案子>/`）；不在時錯誤訊息會列出檔案，加 `--copy-assets` 自動複製。
+- 回報的盤面合成名稱、標記、`frames/` 檢查畫面（EffectCraft 實際算圖）和影片用法同 `ae`：用 Read 看 2~3 張，影片用 SendUserFile 傳給開發人員。
+- 有 ⚠ 警告（例如畫不出連線、只留框格子）要轉告開發人員；已知差異見 [cli.md](reference/cli.md)「EffectCraft 已知限制」。最終交付仍以 AE 為準。
 
 ### 8. 交付
 告訴開發人員：

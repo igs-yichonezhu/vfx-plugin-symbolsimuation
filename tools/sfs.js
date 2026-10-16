@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * SlotFakeSpin 命令列工具：給 agent / skill 操作設定檔、檢查節奏、出預覽、驅動 AE。
- * 只用 Node 內建模組；預覽圖需要 Python + Pillow；ae 指令需要本機裝有 After Effects。
+ * 只用 Node 內建模組；預覽圖需要 Python + Pillow；ae 指令需要本機裝有 After Effects；ec 指令需要 EffectCraft（tools/ec.js）。
  *
  * 執行 `node tools/sfs.js help` 看全部指令。
  */
@@ -50,6 +50,14 @@ After Effects
                                   在執行中的 AE 建立 / 更新盤面，回傳標記時間與檢查畫面
                                   （AE 要勾選 偏好設定 > 指令碼與運算式 > 允許指令碼寫入檔案及存取網路）
                                   找不到 AE 時設定環境變數 SFS_AE（AfterFX.exe 路徑，或 macOS 的 App 名稱）
+
+EffectCraft（沒有 AE 時預覽）
+  ec <preset> --project <專案.ecproj> [--comp 合成名稱] [--mode auto|new|update] [--board 盤面合成名稱]
+              [--pos x,y] [--frames auto|none|秒,秒] [--render out.mp4] [--range 開始秒,結束秒]
+              [--save-as 另存.ecproj] [--copy-assets] [--out 資料夾] [--timeout 300] [--dry-run]
+                                  用 EffectCraft 建立 / 更新盤面並存檔，回傳標記、算出檢查畫面（與影片）
+                                  專案不存在時建立新專案；素材要在專案資料夾內（--copy-assets 自動複製進去）
+                                  找不到 EffectCraft 時設定環境變數 SFS_EC（effectcraft-cli 的完整路徑）
 `;
 
 // ---------------------------------------------------------------- 參數
@@ -661,6 +669,7 @@ function main() {
     case "render": return cmdRender(pos[0], opt);
     case "symbols-sheet": return cmdSymbolsSheet(pos[0], pos[1]);
     case "ae": return cmdAE(pos[0], opt);
+    case "ec": return require("./ec.js").cmdEC(pos[0], opt, { load, fail });
     case undefined: case "help": case "-h": case "--help": process.stdout.write(HELP); return;
     default: fail("不認得的指令 " + cmd + "\n\n" + HELP);
   }

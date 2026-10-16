@@ -4,6 +4,7 @@
  *  - 全部包在 IIFE 裡，不污染 AE 的全域
  *  - 移除註解，非 ASCII 字元全部轉成 \uXXXX（不受作業系統語系 / 檔案編碼影響）
  *  - 用 acorn 以 ECMAScript 3 文法檢查（ExtendScript 只支援 ES3）
+ *  - 擋下 EffectCraft 腳本引擎沒有的內建方法（FORBIDDEN_MEMBERS）
  */
 "use strict";
 const fs = require("fs");
@@ -22,6 +23,27 @@ const TARGETS = [
     install: [" * Usage: run from File > Scripts > Run Script File (asks for a preset),",
       " *        or let tools/sfs.js launch it via $.global.SFS_APPLY."] },
 ];
+
+// EffectCraft 0.3.1（AE 相容的開源合成器，tools/sfs.js ec 用它）的腳本引擎缺少的內建方法：src/ 不能用
+const FORBIDDEN_MEMBERS = {
+  substr: "EffectCraft 沒有 String.prototype.substr，請改用 substring 或 slice",
+};
+
+// 找出 x.substr / x["substr"] 這類用法（註解、一般字串裡的字不算）
+function checkForbidden(code, file) {
+  const toks = [];
+  for (const t of acorn.tokenizer(code, { ecmaVersion: 3, locations: true })) toks.push(t);
+  const errors = [];
+  for (let i = 1; i < toks.length; i++) {
+    const t = toks[i], prev = toks[i - 1].type.label;
+    const name = t.type.label === "name" && prev === "." ? t.value
+      : t.type.label === "string" && prev === "[" && toks[i + 1] && toks[i + 1].type.label === "]" ? t.value : null;
+    if (name && Object.prototype.hasOwnProperty.call(FORBIDDEN_MEMBERS, name)) {
+      errors.push(file + ":" + t.loc.start.line + " 用了 ." + name + "：" + FORBIDDEN_MEMBERS[name]);
+    }
+  }
+  if (errors.length) throw new Error(errors.join("\n"));
+}
 
 function stripComments(code, file) {
   const comments = [];
@@ -60,6 +82,7 @@ function escapeNonAscii(code) {
 function buildOne(target, version) {
   const parts = target.src.map((f) => {
     const code = fs.readFileSync(path.join(ROOT, "src", f), "utf8");
+    checkForbidden(code, "src/" + f);
     return "// ---- " + f + " ----\n" + stripComments(code, f).trim() + "\n";
   });
   const header = [
@@ -91,7 +114,7 @@ function build() {
   return TARGETS.map((t) => buildOne(t, pkg.version));
 }
 
-module.exports = { build };
+module.exports = { build, checkForbidden, FORBIDDEN_MEMBERS };
 
 if (require.main === module) {
   for (const out of build()) {

@@ -39,6 +39,15 @@
     // ------------------------------------------------------------------
     // 專案項目工具
     // ------------------------------------------------------------------
+    // EffectCraft（開源的 AE 相容合成器）有幾個地方跟 AE 不同，只在偵測到它時調整，AE 的行為不變
+    A.isEffectCraft = function () {
+        try {
+            return /EffectCraft/i.test(String(app.version)) && typeof app.run === "function";
+        } catch (e) {
+            return false;
+        }
+    };
+
     A.activeComp = function () {
         var it = app.project ? app.project.activeItem : null;
         return (it && it instanceof CompItem) ? it : null;
@@ -399,8 +408,23 @@
         p.property("ADBE Vector Shape").setValue(sh);
     }
 
+    // EffectCraft 0.3.1 不能用 addProperty("ADBE Vector Shape - Group") 建自由路徑，改用它的 shape.newPath 指令：
+    // 會在最上面新增一個群組（路徑 + 筆畫），這裡把它改名成 group。要在圖層還沒有其他群組時呼叫。
+    function addPathGroupEC(lyr, group, points) {
+        app.run("shape.newPath", { comp: lyr.containingComp.id, layer: lyr.id, vertices: points, closed: false, fill: false, space: "layer" });
+        var root = lyr.property("ADBE Root Vectors Group");
+        if (root.numProperties !== 1) { throw new Error(T("shape.newPath 沒有建立群組")); }
+        root.property(1).name = group;
+        if (!vecs(lyr, group).property("ADBE Vector Graphic - Stroke")) {
+            vecs(lyr, group).addProperty("ADBE Vector Graphic - Stroke");
+        }
+    }
+
     function addStroke(lyr, group, rgb, width) {
-        var st = vecs(lyr, group).addProperty("ADBE Vector Graphic - Stroke");
+        styleStroke(vecs(lyr, group).addProperty("ADBE Vector Graphic - Stroke"), rgb, width);
+    }
+
+    function styleStroke(st, rgb, width) {
         st.property("ADBE Vector Stroke Color").setValue([rgb[0], rgb[1], rgb[2], 1]);
         st.property("ADBE Vector Stroke Width").setValue(width);
         try {
@@ -486,11 +510,26 @@
     }
 
     // ---------------- 連線 ----------------
-    function buildLine(board, pl, cfg, plan, cellAsset) {
+    // host：{ ec: 是否為 EffectCraft, pathErrors: [] 畫不出線的連線 }
+    function buildLine(board, pl, cfg, plan, cellAsset, host) {
         var L = cfg.layout, LS = cfg.lineStyle, i, k;
         var lyr = newShapeLayer(board, (pl.highlight ? "Highlight " : "Line ") + (pl.index + 1));
         var hasPath = pl.points.length >= 2;
-        if (hasPath) {
+        if (hasPath && host.ec) {
+            try {
+                addPathGroupEC(lyr, "Line", pl.points);
+                styleStroke(vecs(lyr, "Line").property("ADBE Vector Graphic - Stroke"), pl.color, Math.max(1, LS.width));
+                addTrim(lyr, "Line");
+            } catch (eEC) {
+                // 畫不出線就只留框格子 / 符號跳動，不讓整個建置失敗
+                host.pathErrors.push({ line: pl.index + 1, error: eEC.toString() });
+                try {
+                    var root = lyr.property("ADBE Root Vectors Group");
+                    for (i = root.numProperties; i >= 1; i--) { root.property(i).remove(); }
+                } catch (eRm) { /* 留下半成品群組也不影響其他部分 */ }
+                hasPath = false;
+            }
+        } else if (hasPath) {
             addGroup(lyr, "Line");
             addPath(lyr, "Line", pl.points);
             addStroke(lyr, "Line", pl.color, Math.max(1, LS.width));
@@ -667,6 +706,8 @@
         var plan = S.computePlan(cfg, fps, { timeOffset: offset });
         if (plan.errors.length) { result.errors = plan.errors; return result; }
         result.warnings = result.warnings.concat(plan.warnings);
+        var host = { ec: A.isEffectCraft(), pathErrors: [] };
+        var mb = !!cfg.spin.motionBlur;
 
         app.beginUndoGroup(update ? T("SlotFakeSpin 更新盤面") : T("SlotFakeSpin 建立假轉"));
         try {
@@ -719,15 +760,22 @@
                 if (boardComp.duration < duration) { boardComp.duration = duration; }
                 duration = boardComp.duration;
             } else {
+                // 先建合成再建同名資料夾：EffectCraft 的合成名稱不能和既有項目重複（會自動改名），資料夾則可以
                 var baseName = uniqueProjectName("SFS_Board");
+                boardComp = app.project.items.addComp(baseName, plan.boardW, plan.boardH, 1, duration, fps);
                 folder = app.project.items.addFolder(baseName);
                 folder.parentFolder = root;
-                boardComp = app.project.items.addComp(baseName, plan.boardW, plan.boardH, 1, duration, fps);
                 boardComp.parentFolder = folder;
             }
-            boardComp.motionBlur = !!cfg.spin.motionBlur;
+            boardComp.motionBlur = mb;
+            if (host.ec) {
+                try {
+                    boardComp.shutterAngle = Math.round(U.clamp(cfg.spin.shutterAngle, 0, 720));
+                    boardComp.shutterPhase = -Math.round(boardComp.shutterAngle / 2);
+                } catch (eSh) { /* ignore */ }
+            }
 
-            // 由最後一輪往前加，時間軸上 R1 會在最上面
+            // 由最後一輪往前加，時間軸上 R1 會在最上面；轉輪合成用盤面合成的實際名稱（EffectCraft 可能改過名）
             for (i = plan.reels.length - 1; i >= 0; i--) {
                 var rp = plan.reels[i];
                 var rc = app.project.items.addComp(boardComp.name + "_R" + (rp.index + 1),
@@ -737,14 +785,25 @@
                 var rl = boardComp.layers.add(rc);
                 rl.name = "Reel " + (rp.index + 1);
                 rl.transform.position.setValue([rp.x, plan.margin + plan.reelH / 2]);
+                // AE 依預組合自己的設定算巢狀合成的模糊；EffectCraft 要外層的開關也打開才有效
+                if (host.ec) { rl.motionBlur = mb; }
             }
             for (i = 0; i < plan.frames.length; i++) { buildFrame(boardComp, plan.frames[i], cfg, plan, frameAsset); }
             buildWinOverlays(boardComp, plan, cfg, map);
-            for (i = 0; i < plan.lines.length; i++) { buildLine(boardComp, plan.lines[i], cfg, plan, cellAsset); }
+            for (i = 0; i < plan.lines.length; i++) { buildLine(boardComp, plan.lines[i], cfg, plan, cellAsset, host); }
+            if (host.pathErrors.length) {
+                var skipped = [];
+                for (i = 0; i < host.pathErrors.length; i++) { skipped.push(host.pathErrors[i].line); }
+                result.warnings.push(T("EffectCraft 畫不出連線路徑，已略過第 {0} 條連線的畫線（框格子、符號跳動照常）：{1}", skipped.join(T("、")), host.pathErrors[0].error));
+            }
 
             if (!boardLayer) {
                 boardLayer = target.layers.add(boardComp);
                 boardLayer.transform.position.setValue([target.width / 2, target.height / 2]);
+            }
+            if (host.ec) {
+                boardLayer.motionBlur = mb;
+                if (mb) { target.motionBlur = true; }
             }
             boardLayer.comment = S.TAG;
             removeOldMarkers(boardLayer);
