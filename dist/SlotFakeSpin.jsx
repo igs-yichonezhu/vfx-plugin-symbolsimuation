@@ -293,7 +293,8 @@ var SFS = SFS || {};
                 scaleMode: "fit",
                 symbolScale: 100,
                 target: "active",
-                newCompFps: 30
+                newCompFps: 30,
+                position: null
             },
             spin: {
                 startTime: 0,
@@ -430,7 +431,8 @@ var SFS = SFS || {};
                     name: String(e.name),
                     path: e.path ? String(e.path) : "",
                     itemId: e.itemId ? Number(e.itemId) : 0,
-                    filler: e.filler !== false
+                    filler: e.filler !== false,
+                    scale: U.toNumber(e.scale, 100)
                 });
             }
         }
@@ -439,6 +441,7 @@ var SFS = SFS || {};
             out[groups[g]] = copyTyped(def[groups[g]], cfg[groups[g]]);
         }
         var L = out.layout, P = out.spin;
+        L.position = S.parsePosition(cfg.layout ? cfg.layout.position : null);
         L.reels = Math.round(U.clamp(L.reels, 1, 20));
         L.rows = Math.round(U.clamp(L.rows, 1, 20));
 
@@ -482,6 +485,14 @@ var SFS = SFS || {};
             if (!isNaN(n) && isFinite(n)) { out.push(n); }
         }
         return out;
+    };
+
+    S.parsePosition = function (v) {
+        var nums = U.isArray(v) ? v : S.parseNumbers(v === null || v === undefined ? "" : String(v).replace(/[xX\u00D7]/g, ","));
+        if (!nums || nums.length !== 2) { return null; }
+        var x = U.toNumber(nums[0], NaN), y = U.toNumber(nums[1], NaN);
+        if (isNaN(x) || isNaN(y)) { return null; }
+        return [x, y];
     };
 
     S.parseOrder = function (text, n) {
@@ -566,6 +577,16 @@ var SFS = SFS || {};
         return out;
     };
 
+    S.entryScale = function (entry) {
+        return entry && entry.scale !== undefined && entry.scale !== null ? Number(entry.scale) : 100;
+    };
+
+    S.symbolScales = function (cfg) {
+        var out = {};
+        for (var i = 0; i < cfg.symbols.length; i++) { out[cfg.symbols[i].name] = S.entryScale(cfg.symbols[i]); }
+        return out;
+    };
+
     S.fillerPool = function (cfg) {
         var out = [], i;
         for (i = 0; i < cfg.symbols.length; i++) {
@@ -612,6 +633,19 @@ var SFS = SFS || {};
             for (var y = 0; y < rows; y++) { b[r][y] = rng.pick(pool); }
         }
         return b;
+    };
+
+    B.randomQuiet = function (cfg, rng, tries) {
+        var L = cfg.layout, trig = S.parseNames(cfg.antRule.symbols), all = S.fillerPool(cfg), pool = [], i, b = null;
+        for (i = 0; i < all.length; i++) { if (U.indexOf(trig, all[i]) < 0) { pool.push(all[i]); } }
+        if (!pool.length) { pool = all; }
+        var probe = { layout: L, lineSet: cfg.lineSet, antRule: cfg.antRule, endBoard: null };
+        for (var k = 0; k < (tries || 200); k++) {
+            b = B.randomize(L.reels, L.rows, pool, rng);
+            probe.endBoard = b;
+            if (!LN.detect(probe).lines.length) { return { board: b, quiet: true }; }
+        }
+        return { board: b, quiet: false };
     };
 
     B.matchName = function (token, names) {
@@ -953,6 +987,9 @@ var SFS = SFS || {};
         if (L.cellW < 4 || L.cellH < 4) { e.push(T("\u683C\u5B50\u5BEC\u9AD8\u81F3\u5C11\u8981 4px")); }
         if (L.gapX < 0 || L.gapY < 0 || L.peek < 0 || L.margin < 0) { e.push(T("\u9593\u8DDD / \u9732\u51FA / \u7559\u767D\u4E0D\u80FD\u662F\u8CA0\u6578")); }
         if (L.symbolScale <= 0) { e.push(T("\u7B26\u865F\u7E2E\u653E\u5FC5\u9808\u5927\u65BC 0")); }
+        for (i = 0; i < cfg.symbols.length; i++) {
+            if (!(S.entryScale(cfg.symbols[i]) > 0)) { e.push(T("\u7B26\u865F\u300C{0}\u300D\u7684\u7E2E\u653E\u5FC5\u9808\u5927\u65BC 0", cfg.symbols[i].name)); }
+        }
         if (P.startTime < 0) { e.push(T("\u958B\u59CB\u6642\u9593\u4E0D\u80FD\u662F\u8CA0\u6578")); }
         var nonNeg = ["windupDist", "windupTime", "accelTime", "speedRamp"];
         for (i = 0; i < nonNeg.length; i++) {
@@ -1317,6 +1354,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         "\u683C\u5B50\u5BEC\u9AD8\u81F3\u5C11\u8981 4px": "Cell width and height must be at least 4 px",
         "\u9593\u8DDD / \u9732\u51FA / \u7559\u767D\u4E0D\u80FD\u662F\u8CA0\u6578": "Gap / peek / margin cannot be negative",
         "\u7B26\u865F\u7E2E\u653E\u5FC5\u9808\u5927\u65BC 0": "Symbol scale must be greater than 0",
+        "\u7B26\u865F\u300C{0}\u300D\u7684\u7E2E\u653E\u5FC5\u9808\u5927\u65BC 0": "The scale of symbol \"{0}\" must be greater than 0",
         "\u958B\u59CB\u6642\u9593\u4E0D\u80FD\u662F\u8CA0\u6578": "Start time cannot be negative",
         "\u624B\u611F\u53C3\u6578\u4E0D\u80FD\u662F\u8CA0\u6578\uFF1A{0}": "Feel settings cannot be negative: {0}",
         "\u76E4\u9762\u5C3A\u5BF8\u8D85\u904E AE \u4E0A\u9650 30000px": "The board is larger than the AE limit of 30000 px",
@@ -1355,6 +1393,8 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         "\u5EFA\u7ACB\u6642\u767C\u751F\u932F\u8AA4\uFF1A{0}{1}": "Build error: {0}{1}",
         "\uFF08line {0}\uFF09": " (line {0})",
         "shape.newPath \u6C92\u6709\u5EFA\u7ACB\u7FA4\u7D44": "shape.newPath didn't create a group",
+        "\u76E4\u9762\u5716\u5C64\u7684\u4F4D\u7F6E\u6709\u95DC\u9375\u5F71\u683C\uFF0C\u6C92\u6709\u5957\u7528\u76E4\u9762\u4F4D\u7F6E {0}": "The board layer's Position has keyframes, so the board position {0} was not applied",
+        "\u76E4\u9762\u4F4D\u7F6E {0}, {1} \u5728\u5408\u6210\u300C{2}\u300D\uFF08{3}x{4}\uFF09\u5916\u9762": "Board position {0}, {1} is outside composition \"{2}\" ({3}x{4})",
         "EffectCraft \u756B\u4E0D\u51FA\u9023\u7DDA\u8DEF\u5F91\uFF0C\u5DF2\u7565\u904E\u7B2C {0} \u689D\u9023\u7DDA\u7684\u756B\u7DDA\uFF08\u6846\u683C\u5B50\u3001\u7B26\u865F\u8DF3\u52D5\u7167\u5E38\uFF09\uFF1A{1}": "EffectCraft couldn't draw the line path, so the line drawing was skipped for line {0} (boxes and symbol pulses still work): {1}",
 
         "\uFF1B\u7A7A\u767D = \u81EA\u52D5\u914D\u8272": "; empty = automatic color",
@@ -1619,7 +1659,6 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         "\u5DF2\u53D6\u6D88": "Cancelled",
         "\u627E\u4E0D\u5230\u5408\u6210\u300C{0}\u300D": "Composition \"{0}\" not found",
         "\u5728\u5408\u6210\u300C{0}\u300D\u88E1\u627E\u4E0D\u5230\u8981\u66F4\u65B0\u7684\u76E4\u9762\u5716\u5C64": "No board layer to update in composition \"{0}\"",
-        "\u7121\u6CD5\u8A2D\u5B9A\u76E4\u9762\u4F4D\u7F6E\uFF08\u4F4D\u7F6E\u6709\u95DC\u9375\u5F71\u683C\uFF1F\uFF09\uFF1A{0}": "Couldn't set the board position (does Position have keyframes?): {0}",
         "SlotFakeSpin\uFF1A\u5B8C\u6210 {0}\uFF08\u5168\u90E8\u505C\u59A5 {1} \u79D2\uFF09{2}": "SlotFakeSpin: built {0} (all settled at {1} s){2}",
         "Error: \u5DF2\u53D6\u6D88": "Error: Cancelled"
     };
@@ -1852,8 +1891,8 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         return base + "_" + (new Date().getTime());
     }
 
-    function symbolScale(item, L) {
-        var k = L.symbolScale / 100;
+    function symbolScale(item, L, pct) {
+        var k = L.symbolScale / 100 * (pct > 0 ? pct / 100 : 1);
         if (L.scaleMode === "fit" && item.width > 0 && item.height > 0) {
             var par = item.pixelAspect || 1;
             k *= Math.min(L.cellW / (item.width * par), L.cellH / item.height);
@@ -1936,7 +1975,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         ctrl.transform.position.dimensionsSeparated = true;
         setKeys(ctrl.transform.property("ADBE Position_1"), rp.keys);
 
-        var hasShy = false;
+        var hasShy = false, scales = S.symbolScales(cfg);
         for (var k = 0; k < rp.strip.length; k++) {
             var s = rp.strip[k];
             var item = map[s.name];
@@ -1944,7 +1983,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             lyr.name = S.layerNameFor(rp.index, s);
             lyr.parent = ctrl;
             lyr.transform.position.setValue(S.stripLocalPos(L, k));
-            var sc = symbolScale(item, L);
+            var sc = symbolScale(item, L, scales[s.name]);
             lyr.transform.scale.setValue([sc, sc]);
             lyr.motionBlur = mb;
             if (s.kind === "start") { lyr.label = 9; }
@@ -2178,7 +2217,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 for (k = 0; k < pl.shows.length; k++) { cells[id].shows.push(pl.shows[k]); }
             }
         }
-        var up = 0.1, down = 0.22;
+        var up = 0.1, down = 0.22, scales = S.symbolScales(cfg);
         for (i = 0; i < order.length; i++) {
             var cell = cells[order[i]];
             var item = map[cfg.endBoard[cell.reel][cell.row]];
@@ -2197,7 +2236,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             var lyr = board.layers.add(item);
             lyr.name = "Win R" + (cell.reel + 1) + "-" + (cell.row + 1) + "_" + cfg.endBoard[cell.reel][cell.row];
             lyr.transform.position.setValue(S.cellCenter(L, cell.reel, cell.row));
-            var base = symbolScale(item, L), big = base * pulse / 100;
+            var base = symbolScale(item, L, scales[cfg.endBoard[cell.reel][cell.row]]), big = base * pulse / 100;
             fitDuration(lyr, item, spans[spans.length - 1].end);
             lyr.inPoint = spans[0].start;
             lyr.outPoint = spans[spans.length - 1].end;
@@ -2241,6 +2280,30 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         }
         return { files: out, error: "" };
     };
+
+    function placeBoard(layer, plan, pos, result) {
+        var tr = layer.transform, comp = layer.containingComp;
+        var p = tr.position, xy = [pos[0], pos[1]];
+        if (p.numKeys > 0 || (p.dimensionsSeparated && (tr.property("ADBE Position_0").numKeys > 0 || tr.property("ADBE Position_1").numKeys > 0))) {
+            result.warnings.push(T("\u76E4\u9762\u5716\u5C64\u7684\u4F4D\u7F6E\u6709\u95DC\u9375\u5F71\u683C\uFF0C\u6C92\u6709\u5957\u7528\u76E4\u9762\u4F4D\u7F6E {0}", xy.join(", ")));
+            return;
+        }
+        if (tr.anchorPoint.numKeys === 0) {
+            var ap = [plan.boardW / 2, plan.boardH / 2];
+            if (layer.threeDLayer) { ap.push(tr.anchorPoint.value[2] || 0); }
+            tr.anchorPoint.setValue(ap);
+        }
+        if (p.dimensionsSeparated) {
+            tr.property("ADBE Position_0").setValue(xy[0]);
+            tr.property("ADBE Position_1").setValue(xy[1]);
+        } else {
+            if (layer.threeDLayer) { xy.push(p.value[2] || 0); }
+            p.setValue(xy);
+        }
+        if (comp && (pos[0] < 0 || pos[1] < 0 || pos[0] > comp.width || pos[1] > comp.height)) {
+            result.warnings.push(T("\u76E4\u9762\u4F4D\u7F6E {0}, {1} \u5728\u5408\u6210\u300C{2}\u300D\uFF08{3}x{4}\uFF09\u5916\u9762", pos[0], pos[1], comp.name, comp.width, comp.height));
+        }
+    }
 
     A.findComp = function (name) {
         var found = null;
@@ -2386,6 +2449,9 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
                 boardLayer = target.layers.add(boardComp);
                 boardLayer.transform.position.setValue([target.width / 2, target.height / 2]);
             }
+
+            var pos = S.parsePosition(L.position);
+            if (pos) { placeBoard(boardLayer, plan, pos, result); }
             if (host.ec) {
                 boardLayer.motionBlur = mb;
                 if (mb) { target.motionBlur = true; }

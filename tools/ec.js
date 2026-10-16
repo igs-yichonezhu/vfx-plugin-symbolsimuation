@@ -175,7 +175,8 @@ function cmdEC(file, opt, deps) {
   if (["auto", "new", "update"].indexOf(mode) < 0) fail("--mode 只能是 auto / new / update");
   if (isNew && str("comp")) fail("新專案裡還沒有合成，不要指定 --comp（會建立新的 SFS_Main 合成）");
   if (isNew && mode === "update") fail("新專案裡沒有盤面可以更新");
-  let position = null;
+  // 沒給 --pos 就用設定檔的 layout.position（例如 from-psd 算好的位置）；兩者都沒有 = 新建時置中、更新時不動
+  let position = cfg.layout.position || null;
   if (str("pos")) {
     position = str("pos").split(",").map(Number);
     if (position.length !== 2 || position.some((v) => !isFinite(v))) fail("--pos 格式是 x,y（例如 540,1434）");

@@ -20,11 +20,18 @@ const HELP = `SlotFakeSpin CLI
 設定檔
   init --symbols <資料夾> [--out preset.json] [--reels 5] [--rows 3] [--cell 200|200x180]
                                   從符號資料夾建立新設定檔（檔名 = 符號名）
+  from-psd <檔案.psd> [--out preset.json] [--group SYMBOLS] [--reel-layer 轉輪] [--frame-layer 轉輪框]
+           [--names 塔可=TACO,粉鑽=PINK|對照.json] [--triggers PINK,BLUE] [--wilds CHILI]
+           [--reels N] [--rows N] [--cell 200x200] [--gap 4x0] [--bg bg.png] [--no-bg] [--fit-oversize]
+                                  從遊戲畫面 PSD 建立設定檔：符號群組拆成 PNG、讀結果盤面、量格子與盤面位置、
+                                  輸出拿掉符號的背景圖（需要 Python + Pillow + psd-tools）
   show <preset>                   顯示符號、盤面、節奏、連線
   board <preset> [--start <文字|@檔案>] [--end <文字|@檔案>]
                                   設定盤面：每行一列（由上到下），「/」也可以換行
-  symbol <preset> <名稱> [--filler on|off] [--rename 新名稱]
+  symbol <preset> <名稱> [--filler on|off] [--rename 新名稱] [--scale %]
+                                  --scale = 這個符號額外縮放（比格子大的符號會被轉輪裁切時用）
   set <preset> key.path=value ... 改任何設定，例如 spin.stopOrder=5,4,3,2,1 frame.color=#FF3366
+                                  layout.position=540,1434 = 盤面中心放在合成的這個位置（空白 = 置中）
   reel <preset> <輪號|all|2,3> key=value ...
                                   逐輪微調，數值前加 +/- 是相對調整（stop=+0.3）（start stop speed decelTime decelCurve overshoot bounceTime
                                   frame frameStart frameSpeed），會關掉自動套用
@@ -45,9 +52,10 @@ const HELP = `SlotFakeSpin CLI
                                   符號總覽圖（名稱 + 圖），用來對照盤面截圖
 
 After Effects
-  ae <preset> [--mode auto|new|update] [--comp 合成名稱] [--board 盤面合成名稱]
+  ae <preset> [--mode auto|new|update] [--comp 合成名稱] [--board 盤面合成名稱] [--position x,y|center]
               [--frames auto|none|秒,秒] [--out 資料夾] [--timeout 180] [--dry-run]
                                   在執行中的 AE 建立 / 更新盤面，回傳標記時間與檢查畫面
+                                  盤面放在 layout.position（--position 可臨時改；center = 置中 / 更新時不動）
                                   （AE 要勾選 偏好設定 > 指令碼與運算式 > 允許指令碼寫入檔案及存取網路）
                                   找不到 AE 時設定環境變數 SFS_AE（AfterFX.exe 路徑，或 macOS 的 App 名稱）
 
@@ -142,7 +150,22 @@ function cmdInit(opt) {
     names.push(name);
     cfg.symbols.push({ name, path: path.resolve(dir, f), itemId: 0, filler: true });
   }
-  // 常見名稱自動分類：百搭 / 觸發型不當填充
+  const { wild, scat } = classifySymbols(cfg);
+  const norm = S.normalizeConfig(cfg);
+  const rng = new S.Rng(Date.now() % 2147483000 + 1);
+  norm.startBoard = S.board.randomQuiet(norm, rng).board;
+  norm.endBoard = S.board.randomize(norm.layout.reels, norm.layout.rows, S.fillerPool(norm), rng);
+  const out = opt.out || "preset.json";
+  save(out, norm);
+  console.log("已建立 " + out + "：" + names.length + " 個符號（" + names.join(", ") + "）");
+  if (wild.length) console.log("  百搭：" + wild.join(", "));
+  if (scat.length) console.log("  觸發型（不當填充、不算連線）：" + scat.join(", "));
+  console.log("  盤面先用亂數填好，請用 board 指令設定起始 / 結果盤面");
+}
+
+// 常見名稱自動分類：百搭 / 觸發型（觸發型不當填充、不算連線）
+function classifySymbols(cfg) {
+  const names = S.symbolNames(cfg);
   const wild = names.filter((n) => /wild|百搭/i.test(n));
   const scat = names.filter((n) => /scatter|bonus|free|分散|免費/i.test(n));
   if (wild.length) cfg.lineSet.wilds = wild.join(",");
@@ -151,17 +174,107 @@ function cmdInit(opt) {
     cfg.antRule.symbols = scat.join(",");
     cfg.symbols.forEach((s) => { if (scat.indexOf(s.name) >= 0) s.filler = false; });
   }
-  const norm = S.normalizeConfig(cfg);
+  return { wild, scat };
+}
+
+function findPsdPython() {
+  for (const exe of ["python3", "python", "py"]) {
+    const r = cp.spawnSync(exe, [path.join(__dirname, "psd.py"), "check"], { encoding: "utf8" });
+    if (r.status === 0) return exe;
+    if (r.status === 1 && /psd-tools/.test(r.stderr || "")) fail(r.stderr.trim());
+  }
+  fail("讀 PSD 需要 Python 3 + Pillow + psd-tools：pip install pillow psd-tools");
+}
+
+function cmdFromPsd(file, opt) {
+  if (!file || !fs.existsSync(file)) fail("用法：from-psd <檔案.psd> --out work/<案子>/preset.json" + (file ? "（找不到 " + file + "）" : ""));
+  const out = path.resolve(opt.out && opt.out !== true ? String(opt.out) : "preset.json");
+  const outDir = path.dirname(out);
+  fs.mkdirSync(outDir, { recursive: true });
+  const args = [path.join(__dirname, "psd.py"), "read", path.resolve(file), outDir];
+  for (const k of ["group", "reel-layer", "frame-layer", "reels", "rows", "cell", "gap"]) {
+    if (opt[k] !== undefined && opt[k] !== true) args.push("--" + k, String(opt[k]));
+  }
+  if (opt.names && opt.names !== true) args.push("--names", fs.existsSync(String(opt.names)) ? path.resolve(String(opt.names)) : String(opt.names));
+  if (opt["symbols-dir"] && opt["symbols-dir"] !== true) args.push("--symbols-dir", path.resolve(String(opt["symbols-dir"])));
+  if (opt["no-bg"]) args.push("--bg", "none");
+  else if (opt.bg && opt.bg !== true) args.push("--bg", path.resolve(String(opt.bg)));
+  const py = findPsdPython();
+  const r = cp.spawnSync(py, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: Object.assign({}, process.env, { PYTHONIOENCODING: "utf-8" }) });
+  if (r.status !== 0) fail("讀 PSD 失敗：\n" + (r.stderr || r.stdout).trim());
+  let res;
+  try { res = JSON.parse(r.stdout); } catch (e) { fail("psd.py 輸出看不懂：" + e.message + "\n" + r.stdout.slice(0, 500)); }
+
+  const g = res.grid;
+  const cfg = S.defaultConfig();
+  Object.assign(cfg.layout, { reels: g.reels, rows: g.rows, cellW: g.cellW, cellH: g.cellH, gapX: g.gapX, gapY: g.gapY,
+    scaleMode: "none", symbolScale: 100, position: g.position });
+  const syms = res.symbols.slice().sort((a, b) => S.util.naturalCompare(a.name, b.name));
+  cfg.symbols = syms.map((s) => ({ name: s.name, path: s.file, itemId: 0, filler: true, scale: 100 }));
+  let { wild, scat } = classifySymbols(cfg);
+  // 先指定觸發 / 百搭：起始盤面就不會放觸發符號，也不會因為百搭出現連線
+  const known = S.symbolNames(cfg);
+  const pick = (k) => {
+    if (!opt[k] || opt[k] === true) return null;
+    const list = S.parseNames(String(opt[k])).map((n) => S.board.matchName(n, known) || fail("--" + k + " 的「" + n + "」不是符號（有：" + known.join(" ") + "）"));
+    return list.filter((n, i) => list.indexOf(n) === i);
+  };
+  const trig = pick("triggers"), wl = pick("wilds");
+  if (wl) { wild = wl; cfg.lineSet.wilds = wl.join(","); }
+  if (trig) {
+    scat = trig;
+    cfg.antRule.symbols = cfg.lineSet.exclude = trig.join(",");
+    cfg.symbols.forEach((s) => { s.filler = trig.indexOf(s.name) < 0; });
+  }
   const rng = new S.Rng(Date.now() % 2147483000 + 1);
-  const pool = S.fillerPool(norm);
-  norm.startBoard = S.board.randomize(norm.layout.reels, norm.layout.rows, pool, rng);
-  norm.endBoard = S.board.randomize(norm.layout.reels, norm.layout.rows, pool, rng);
-  const out = opt.out || "preset.json";
+  const empty = [];
+  cfg.endBoard = res.board.map((col, r) => col.map((v, y) => {
+    if (v) return v;
+    empty.push("第 " + (r + 1) + " 輪第 " + (y + 1) + " 列");
+    return rng.pick(S.fillerPool(cfg));
+  }));
+  const oversize = [];
+  syms.forEach((s) => {
+    if (s.width <= g.cellW && s.height <= g.cellH) return;
+    const fit = Math.floor(Math.min(g.cellW / s.width, g.cellH / s.height) * 100);
+    oversize.push({ s, fit });
+    if (opt["fit-oversize"]) cfg.symbols.find((e) => e.name === s.name).scale = fit;
+  });
+  const norm = S.normalizeConfig(cfg);
+  const quiet = S.board.randomQuiet(norm, rng);
+  norm.startBoard = quiet.board;
   save(out, norm);
-  console.log("已建立 " + out + "：" + names.length + " 個符號（" + names.join(", ") + "）");
+
+  if (!syms.length) fail("符號群組「" + res.group + "」裡沒有圖");
+  const rel = (p) => { const x = path.relative(outDir, p); return x && !x.startsWith("..") && !path.isAbsolute(x) ? x.split(path.sep).join("/") : p; };
+  const outRel = path.relative(process.cwd(), out) || out;
+  const label = (s) => s.name + (s.label !== s.name ? "(" + s.label + ")" : "") + (s.visible ? "" : "[隱藏]");
+  const indent = (t) => t.split("\n").map((l) => "    " + l).join("\n");
+  console.log("已建立 " + path.relative(process.cwd(), out) + "（" + path.basename(res.file) + " " + res.width + "×" + res.height + "，符號群組「" + res.group + "」）");
+  console.log("  符號 " + syms.length + " 個 → " + rel(path.dirname(syms[0].file)) + "/：" + syms.map(label).join(" "));
   if (wild.length) console.log("  百搭：" + wild.join(", "));
   if (scat.length) console.log("  觸發型（不當填充、不算連線）：" + scat.join(", "));
-  console.log("  盤面先用亂數填好，請用 board 指令設定起始 / 結果盤面");
+  console.log("  格子：" + g.reels + " 輪 × " + g.rows + " 列，格子 " + g.cellW + "×" + g.cellH + "，輪距 " + g.gapX + "、列距 " + g.gapY +
+    (g.source ? "（量轉輪窗「" + g.source + "」）" : ""));
+  g.notes.forEach((n) => console.log("    " + n));
+  console.log("  位置：格線左上 (" + g.left + ", " + g.top + ")，盤面中心 (" + g.position.join(", ") + ") → layout.position（AE 建立 / 更新時放到這裡）");
+  console.log("  結果盤面（PSD）：\n" + indent(boardText(norm, "end")));
+  res.covered.forEach((c) => console.log("  被蓋住、沒算進盤面：" + c.layer + "（第 " + c.reel + " 輪第 " + c.row + " 列，被「" + c.by + "」蓋住）"));
+  console.log("  起始盤面（亂數" + (quiet.quiet ? "，沒有觸發符號、沒有連線" : "；找不到沒有連線的組合，請用 board --start 設定") + "）：\n" + indent(boardText(norm, "start")));
+  if (res.background) console.log("  背景（拿掉符號群組）：" + rel(res.background) + "（放在 AE 主合成最底層，" + res.width + "×" + res.height + "）");
+  res.notes.forEach((n) => console.log("  說明：" + n));
+  res.warnings.forEach((w) => console.log("⚠ " + w));
+  if (empty.length) console.log("⚠ 這些格子在 PSD 裡沒有符號，先用亂數補上，請用 board --end 設定：" + empty.join("、"));
+  oversize.forEach(({ s, fit }) => console.log("⚠ " + s.name + " " + s.width + "×" + s.height + " 比格子 " + g.cellW + "×" + g.cellH +
+    " 大，在轉輪合成裡會被裁切" + (opt["fit-oversize"] ? "：已設定縮放 " + fit + "%" :
+    "：可縮小 node tools/sfs.js symbol " + outRel + " " + s.name + " --scale " + fit + "（或 from-psd 加 --fit-oversize）")));
+  const nonAscii = syms.filter((s) => /[^\x20-\x7e]/.test(s.name));
+  if (nonAscii.length) {
+    console.log("提示：中文符號名稱可以改成短的英數字（盤面文字比較好打），例如：\n    node tools/sfs.js symbol " + outRel + " " + nonAscii[0].name + " --rename 新名稱" +
+      "\n  或重新執行並加上 --names \"" + nonAscii.map((s) => s.name + "=").join(",") + "\"（也可以給 JSON 檔 {\"" + nonAscii[0].name + "\": \"...\"}）");
+  }
+  console.log("下一步：show 確認" + (trig ? "" : " → 設定觸發 / 百搭（重跑 from-psd 加 --triggers / --wilds，或 set antRule.symbols=… lineSet.exclude=… lineSet.wilds=…）") +
+    " → lines --detect → suggest --apply → check → render");
 }
 
 function boardText(cfg, which) {
@@ -171,8 +284,9 @@ function boardText(cfg, which) {
 function cmdShow(file) {
   const cfg = load(file);
   const L = cfg.layout;
-  console.log("盤面 " + L.reels + "x" + L.rows + "，格子 " + L.cellW + "x" + L.cellH + "，開始時間 " + cfg.spin.startTime + " 秒");
-  console.log("符號：" + cfg.symbols.map((s) => s.name + (s.filler ? "" : "*")).join(" ") + "   （* = 不當填充）");
+  console.log("盤面 " + L.reels + "x" + L.rows + "，格子 " + L.cellW + "x" + L.cellH + "，開始時間 " + cfg.spin.startTime + " 秒" +
+    "，位置 " + (L.position ? L.position.join(", ") : "置中"));
+  console.log("符號：" + cfg.symbols.map((s) => s.name + (s.filler ? "" : "*") + (s.scale !== 100 ? "(" + s.scale + "%)" : "")).join(" ") + "   （* = 不當填充）");
   console.log("百搭：" + (cfg.lineSet.wilds || "-") + "   不算連線：" + (cfg.lineSet.exclude || "-") + "   觸發：" + cfg.antRule.symbols + "×" + cfg.antRule.count + "   聽牌：" + (cfg.antRule.tease || "-"));
   console.log("\n起始盤面：\n" + boardText(cfg, "start") + "\n\n結果盤面：\n" + boardText(cfg, "end"));
   const P = cfg.spin;
@@ -214,6 +328,11 @@ function cmdSymbol(file, name, opt) {
   const e = cfg.symbols.find((s) => s.name === name) || cfg.symbols.find((s) => s.name.toLowerCase() === String(name).toLowerCase());
   if (!e) fail("找不到符號 " + name + "（有：" + S.symbolNames(cfg).join(" ") + "）");
   if (opt.filler !== undefined) e.filler = !/^(off|false|0|no)$/i.test(String(opt.filler));
+  if (opt.scale !== undefined) {
+    const v = Number(String(opt.scale).replace(/%$/, ""));
+    if (!(v > 0)) fail("--scale 要是大於 0 的百分比，例如 87");
+    e.scale = v;
+  }
   if (opt.rename && opt.rename !== true) {
     const nn = String(opt.rename).trim();
     if (S.symbolNames(cfg).indexOf(nn) >= 0) fail("名稱已存在：" + nn);
@@ -225,7 +344,7 @@ function cmdSymbol(file, name, opt) {
     e.name = nn;
   }
   save(file, cfg);
-  console.log(e.name + "：" + (e.filler ? "填充符號" : "不當填充") + "  " + e.path);
+  console.log(e.name + "：" + (e.filler ? "填充符號" : "不當填充") + (e.scale !== 100 ? "，縮放 " + e.scale + "%" : "") + "  " + e.path);
 }
 
 function setPath(obj, keyPath, value) {
@@ -467,7 +586,7 @@ function sceneFor(cfg, fps, shots, outScale) {
     return { t, label, reels, frames: frameOv, wins, lines };
   });
   return { width: plan.boardW, height: plan.boardH, margin: plan.margin, reelW: L.cellW, reelH: plan.reelH, cellW: L.cellW, cellH: L.cellH,
-    pitch: plan.pitch, scaleMode: L.scaleMode, symbolScale: L.symbolScale, symbols, fps, outScale: outScale || 1,
+    pitch: plan.pitch, scaleMode: L.scaleMode, symbolScale: L.symbolScale, symbolScales: S.symbolScales(cfg), symbols, fps, outScale: outScale || 1,
     reels: plan.reels.map((rp) => ({ x: rp.x, strip: rp.strip.map((s) => s.name) })), frames, plan };
 }
 
@@ -599,12 +718,19 @@ function cmdAE(file, opt) {
   fs.mkdirSync(outDir, { recursive: true });
   const resultFile = path.join(outDir, "result.json");
   if (fs.existsSync(resultFile)) fs.unlinkSync(resultFile);
+  let position = cfg.layout.position;
+  if (opt.position !== undefined && opt.position !== true) {
+    const center = /^(center|none|置中)$/i.test(String(opt.position));
+    position = center ? null : S.parsePosition(String(opt.position));
+    if (!center && !position) fail("--position 格式是 540,1434 或 center");
+  }
   let frames = opt.frames === undefined || opt.frames === true ? "auto" : String(opt.frames);
   if (frames !== "auto" && frames !== "none") frames = frames.split(",").map(Number).filter((x) => !isNaN(x));
   const job = {
     preset: path.resolve(file), mode: opt.mode && opt.mode !== true ? String(opt.mode) : "auto",
     comp: opt.comp && opt.comp !== true ? String(opt.comp) : "", board: opt.board && opt.board !== true ? String(opt.board) : "",
     result: resultFile, frames, framesDir: path.join(outDir, "frames"),
+    position, // 盤面中心在目標合成的位置；null = 新建時置中、更新時不動
   };
   const launcher = path.join(outDir, "launch.jsx");
   fs.writeFileSync(launcher, escapeNonAscii(
@@ -617,6 +743,7 @@ function cmdAE(file, opt) {
   else if (ae && ae.kind === "mac") cmd = ["osascript", ["-e", "tell application \"" + ae.app + "\" to DoScriptFile \"" + launcher + "\""]];
   if (opt["dry-run"]) {
     console.log("啟動腳本：" + launcher);
+    console.log("盤面位置：" + (position ? position.join(", ") + "（盤面中心）" : "新建時放合成中央，更新時不動"));
     console.log(cmd ? "指令：" + [cmd[0]].concat(cmd[1]).map((x) => (/\s/.test(x) ? JSON.stringify(x) : x)).join(" ") : "找不到 After Effects（可設定環境變數 SFS_AE）");
     return;
   }
@@ -657,6 +784,7 @@ function main() {
   const { pos, opt } = parseArgs(rest);
   switch (cmd) {
     case "init": return cmdInit(opt);
+    case "from-psd": return cmdFromPsd(pos[0], opt);
     case "show": return cmdShow(pos[0]);
     case "board": return cmdBoard(pos[0], opt);
     case "symbol": return cmdSymbol(pos[0], pos[1], opt);

@@ -50,8 +50,9 @@ def placeholder(name, w, h):
 
 
 class SymbolCache:
-    def __init__(self, paths, cell_w, cell_h, mode="fit", scale=100):
+    def __init__(self, paths, cell_w, cell_h, mode="fit", scale=100, scales=None):
         self.paths, self.cw, self.ch, self.mode, self.scale = paths, cell_w, cell_h, mode, scale
+        self.scales = scales or {}  # 個別符號的額外縮放 %（symbols[i].scale）
         self.src, self.cache = {}, {}
 
     def source(self, name):
@@ -74,7 +75,7 @@ class SymbolCache:
         if im is None:
             out = placeholder(name, max(4, int(self.cw * rel)), max(4, int(self.ch * rel)))
         else:
-            k = self.scale / 100.0
+            k = self.scale / 100.0 * self.scales.get(name, 100) / 100.0
             if self.mode == "fit":
                 k *= min(self.cw / im.width, self.ch / im.height)
             k *= rel
@@ -193,7 +194,8 @@ def scaled(img, k):
 
 def cmd_scene(scene_path, mode, out, extra):
     sc = json.load(open(scene_path, encoding="utf-8"))
-    syms = SymbolCache(sc["symbols"], sc["cellW"], sc["cellH"], sc.get("scaleMode", "fit"), sc.get("symbolScale", 100))
+    syms = SymbolCache(sc["symbols"], sc["cellW"], sc["cellH"], sc.get("scaleMode", "fit"), sc.get("symbolScale", 100),
+                       sc.get("symbolScales"))
     k = sc.get("outScale", 1.0)
     if mode == "gif":
         frames = [scaled(render_frame(sc, syms, fr), k).convert("RGB").convert("P", palette=Image.ADAPTIVE, colors=160)

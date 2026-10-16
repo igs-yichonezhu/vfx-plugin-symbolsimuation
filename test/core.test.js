@@ -498,3 +498,39 @@ test("期待感：apply 寫入期待輪並重新產生各輪", () => {
   assert.ok(res.reasons.length >= 3);
   deq(SFS.computePlan(cfg, 30).errors, []);
 });
+
+test("盤面位置 / 個別符號縮放：解析、補齊、JSON 來回", () => {
+  deq(SFS.parsePosition([540, 1434]), [540, 1434]);
+  deq(SFS.parsePosition("540,1434"), [540, 1434]);
+  deq(SFS.parsePosition(" 540 x 1434.5 "), [540, 1434.5]);
+  [null, undefined, "", "540", "a,b", ["a", 1], [1, 2, 3]].forEach((v) => assert.strictEqual(SFS.parsePosition(v), null, String(v)));
+  const n = SFS.normalizeConfig({ layout: { position: "100, 200" }, symbols: [{ name: "A" }, { name: "B", scale: "87" }] });
+  deq(n.layout.position, [100, 200]);
+  deq(n.symbols.map((s) => s.scale), [100, 87]);
+  assert.strictEqual(SFS.normalizeConfig({}).layout.position, null);
+  assert.strictEqual(SFS.normalizeConfig({ layout: { position: "" } }).layout.position, null);
+  deq(SFS.normalizeConfig(SFS.json.parse(SFS.json.stringify(n))).layout.position, [100, 200]);
+  deq(SFS.symbolScales(n), { A: 100, B: 87 });
+  const cfg = sampleConfig(SFS);
+  cfg.symbols[0].scale = 0;
+  assert.ok(SFS.validateConfig(cfg).some((e) => /「A」的縮放/.test(e)));
+  delete cfg.symbols[0].scale;
+  deq(SFS.validateConfig(cfg), [], "missing scale = 100");
+});
+
+test("board.randomQuiet：起始盤面沒有觸發符號、沒有連線", () => {
+  const cfg = sampleConfig(SFS);
+  cfg.symbols.find((s) => s.name === "SEVEN").filler = true;
+  for (let seed = 1; seed <= 40; seed++) {
+    const res = SFS.board.randomQuiet(cfg, new SFS.Rng(seed));
+    assert.ok(res.quiet);
+    deq(SFS.lines.detect(Object.assign({}, cfg, { endBoard: res.board })).lines, []);
+    assert.ok(res.board.every((col) => col.every((v) => v && v !== "SCATTER")));
+  }
+  // 觸發符號就算被標成填充也不會放
+  cfg.symbols.find((s) => s.name === "SCATTER").filler = true;
+  assert.ok(SFS.board.randomQuiet(cfg, new SFS.Rng(3)).board.every((col) => col.indexOf("SCATTER") < 0));
+  // 只有一種符號：一定連線 → quiet = false
+  const one = sampleConfig(SFS, (c) => { c.symbols = [{ name: "A", path: "", itemId: 0, filler: true }]; c.antRule.symbols = ""; });
+  assert.strictEqual(SFS.board.randomQuiet(one, new SFS.Rng(1), 5).quiet, false);
+});

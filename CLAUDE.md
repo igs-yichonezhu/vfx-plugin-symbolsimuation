@@ -15,7 +15,7 @@ npm run build     # 只建置
 
 - 原始碼在 `src/`（ExtendScript，只能用 ES3：不能 let/const/箭頭函式/Array.forEach/JSON，保留字不能當屬性名）。`dist/` 是建置產物，不要手改，改完 `src/` 要重新建置並提交 `dist/`。
 - `src/core.js` 是純邏輯（可在 Node 執行），AE DOM 只放 `src/ae.js`，面板在 `src/ui.js`，自動化入口 `src/apply.js`。
-- `tools/sfs.js`（Node）與 `tools/render.py`（Python + Pillow）是給 agent 用的命令列與預覽。
+- `tools/sfs.js`（Node）與 `tools/render.py`（Python + Pillow）是給 agent 用的命令列與預覽；`tools/psd.py`（Pillow + psd-tools）給 `from-psd` 讀遊戲畫面 PSD，psd-tools 只在函式裡 import，其他部分沒有它也能測。
 - `tools/ec.js` 是 `sfs.js ec` 的 EffectCraft 後端（沒有 AE 時用開源的 EffectCraft 建盤面 / 算圖）。`src/` 也不能用 `.substr`（EffectCraft 沒有，建置會擋）；EffectCraft 專用的處理放在 `src/ae.js` 的 `A.isEffectCraft()` 分支，不要改變 AE 的行為。
 - 改版本要同時改 `package.json` 和 `src/core.js` 的 `S.VERSION`（建置會檢查）。
 - 介面文字、註解、文件用繁體中文。面板有英文版：介面字串一律包 `T("繁中原文 {0}", 參數)`（不要用 `+` 拼句子），並同步在 `src/i18n_en.js` 加英文（`npm test` 會檢查）。

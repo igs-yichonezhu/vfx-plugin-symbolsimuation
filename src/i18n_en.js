@@ -31,6 +31,7 @@
         "格子寬高至少要 4px": "Cell width and height must be at least 4 px",
         "間距 / 露出 / 留白不能是負數": "Gap / peek / margin cannot be negative",
         "符號縮放必須大於 0": "Symbol scale must be greater than 0",
+        "符號「{0}」的縮放必須大於 0": "The scale of symbol \"{0}\" must be greater than 0",
         "開始時間不能是負數": "Start time cannot be negative",
         "手感參數不能是負數：{0}": "Feel settings cannot be negative: {0}",
         "盤面尺寸超過 AE 上限 30000px": "The board is larger than the AE limit of 30000 px",
@@ -69,6 +70,8 @@
         "建立時發生錯誤：{0}{1}": "Build error: {0}{1}",
         "（line {0}）": " (line {0})",
         "shape.newPath 沒有建立群組": "shape.newPath didn't create a group",
+        "盤面圖層的位置有關鍵影格，沒有套用盤面位置 {0}": "The board layer's Position has keyframes, so the board position {0} was not applied",
+        "盤面位置 {0}, {1} 在合成「{2}」（{3}x{4}）外面": "Board position {0}, {1} is outside composition \"{2}\" ({3}x{4})",
         "EffectCraft 畫不出連線路徑，已略過第 {0} 條連線的畫線（框格子、符號跳動照常）：{1}": "EffectCraft couldn't draw the line path, so the line drawing was skipped for line {0} (boxes and symbol pulses still work): {1}",
         // ui.js
         "；空白 = 自動配色": "; empty = automatic color",
@@ -333,7 +336,6 @@
         "已取消": "Cancelled",
         "找不到合成「{0}」": "Composition \"{0}\" not found",
         "在合成「{0}」裡找不到要更新的盤面圖層": "No board layer to update in composition \"{0}\"",
-        "無法設定盤面位置（位置有關鍵影格？）：{0}": "Couldn't set the board position (does Position have keyframes?): {0}",
         "SlotFakeSpin：完成 {0}（全部停妥 {1} 秒）{2}": "SlotFakeSpin: built {0} (all settled at {1} s){2}",
         "Error: 已取消": "Error: Cancelled"
     };

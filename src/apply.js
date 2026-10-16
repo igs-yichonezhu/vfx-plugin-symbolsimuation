@@ -5,7 +5,7 @@
  * 由啟動腳本先設定 $.global.SFS_APPLY 再 $.evalFile 本檔：
  *   { preset: 設定檔路徑, mode: "auto"|"new"|"update", comp: 目標合成名稱（可省略 = 目前合成）,
  *     board: 盤面合成名稱（可省略）, result: 結果 JSON 路徑, frames: "auto"|"none"|[秒...], framesDir: 輸出資料夾,
- *     position: [x, y] 盤面圖層位置（可省略 = 新建時放中央、更新時不動） }
+ *     position: [x, y] 盤面中心位置 | null 置中（可省略 = 用設定檔的 layout.position） }
  * EffectCraft（tools/sfs.js ec）另外用：
  *   config: 直接帶設定內容（取代 preset；腳本只能讀專案資料夾裡的檔案）, base: 設定裡相對路徑的基準資料夾,
  *   print: true = 結果用 writeLn 輸出一行「SFS_RESULT <json>」、不寫檔、不輸出檢查畫面（只回傳 shots，由 CLI 算圖）
@@ -76,6 +76,8 @@ try {
     }
     var cfg = job.config ? SFS.absolutizePaths(SFS.normalizeConfig(job.config), job.base || "") :
         SFS.absolutizePaths(SFS.normalizeConfig(SFS.json.parse(readText(job.preset))), new File(job.preset).parent.fsName);
+    // 啟動腳本帶的盤面位置（sfs.js ae --position 可以臨時改；null = 置中 / 更新時不動）
+    if (job.hasOwnProperty("position")) { cfg.layout.position = SFS.parsePosition(job.position); }
     var target = job.comp ? SFS.ae.findComp(job.comp) : SFS.ae.activeComp();
     if (job.comp && !target) { throw new Error(T("找不到合成「{0}」", job.comp)); }
     var mode = job.mode || "auto";
@@ -96,10 +98,7 @@ try {
         result.targetDuration = res.target.duration;
         result.fps = res.plan.fps;
         result.board = res.boardComp.name;
-        if (job.position) {
-            try { res.boardLayer.transform.position.setValue([Number(job.position[0]), Number(job.position[1])]); }
-            catch (ePos) { result.warnings.push(T("無法設定盤面位置（位置有關鍵影格？）：{0}", ePos.toString())); }
-        }
+        // 盤面位置已由 SFS.ae.build 依 layout.position 放好（job.position 在上面覆寫過），這裡只回報實際位置
         var pos = res.boardLayer.transform.position.value;
         result.position = [pos[0], pos[1]];
         result.startTime = res.plan.startTime + offset;

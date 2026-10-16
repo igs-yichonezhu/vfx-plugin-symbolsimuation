@@ -302,7 +302,7 @@ var SFS = SFS || {};
     S.defaultConfig = function () {
         var cfg = {
             version: 2,
-            // 符號庫：{ name, path, itemId, filler }
+            // 符號庫：{ name, path, itemId, filler, scale（這個符號額外縮放 %，預設 100）}
             symbols: [],
             layout: {
                 reels: 5,          // 輪數（直排數）
@@ -316,7 +316,8 @@ var SFS = SFS || {};
                 scaleMode: "fit",  // fit = 縮放到符合格子；none = 原尺寸
                 symbolScale: 100,  // 額外縮放 %
                 target: "active",  // active = 目前合成；new = 新建合成
-                newCompFps: 30
+                newCompFps: 30,
+                position: null     // 盤面中心在目標合成的位置 [x, y]；null = 新建時放合成中央、更新時不動
             },
             spin: {
                 startTime: 0,          // 開始轉動時間（秒，目標合成時間）
@@ -456,7 +457,8 @@ var SFS = SFS || {};
                     name: String(e.name),
                     path: e.path ? String(e.path) : "",
                     itemId: e.itemId ? Number(e.itemId) : 0,
-                    filler: e.filler !== false
+                    filler: e.filler !== false,
+                    scale: U.toNumber(e.scale, 100)
                 });
             }
         }
@@ -465,6 +467,7 @@ var SFS = SFS || {};
             out[groups[g]] = copyTyped(def[groups[g]], cfg[groups[g]]);
         }
         var L = out.layout, P = out.spin;
+        L.position = S.parsePosition(cfg.layout ? cfg.layout.position : null);
         L.reels = Math.round(U.clamp(L.reels, 1, 20));
         L.rows = Math.round(U.clamp(L.rows, 1, 20));
         // AE 合成尺寸必須是整數
@@ -511,6 +514,15 @@ var SFS = SFS || {};
             if (!isNaN(n) && isFinite(n)) { out.push(n); }
         }
         return out;
+    };
+
+    // 盤面位置：[540, 1434] 或 "540,1434" -> [540, 1434]；空白 / 格式不對 -> null（= 維持置中）
+    S.parsePosition = function (v) {
+        var nums = U.isArray(v) ? v : S.parseNumbers(v === null || v === undefined ? "" : String(v).replace(/[xX×]/g, ","));
+        if (!nums || nums.length !== 2) { return null; }
+        var x = U.toNumber(nums[0], NaN), y = U.toNumber(nums[1], NaN);
+        if (isNaN(x) || isNaN(y)) { return null; }
+        return [x, y];
     };
 
     // "1+2, 3, 4, 5" -> [[0,1],[2],[3],[4]]；沒寫到的輪依序補在後面，重複的忽略
@@ -598,6 +610,18 @@ var SFS = SFS || {};
         return out;
     };
 
+    // 單一符號的額外縮放 %（沒設定 = 100）
+    S.entryScale = function (entry) {
+        return entry && entry.scale !== undefined && entry.scale !== null ? Number(entry.scale) : 100;
+    };
+
+    // 符號名稱 -> 額外縮放 %
+    S.symbolScales = function (cfg) {
+        var out = {};
+        for (var i = 0; i < cfg.symbols.length; i++) { out[cfg.symbols[i].name] = S.entryScale(cfg.symbols[i]); }
+        return out;
+    };
+
     S.fillerPool = function (cfg) {
         var out = [], i;
         for (i = 0; i < cfg.symbols.length; i++) {
@@ -649,6 +673,20 @@ var SFS = SFS || {};
             for (var y = 0; y < rows; y++) { b[r][y] = rng.pick(pool); }
         }
         return b;
+    };
+
+    // 起始盤面用：亂數填充符號，不放觸發符號、也不要有連線（試 tries 次；都有連線就回傳最後一個，quiet = false）
+    B.randomQuiet = function (cfg, rng, tries) {
+        var L = cfg.layout, trig = S.parseNames(cfg.antRule.symbols), all = S.fillerPool(cfg), pool = [], i, b = null;
+        for (i = 0; i < all.length; i++) { if (U.indexOf(trig, all[i]) < 0) { pool.push(all[i]); } }
+        if (!pool.length) { pool = all; }
+        var probe = { layout: L, lineSet: cfg.lineSet, antRule: cfg.antRule, endBoard: null };
+        for (var k = 0; k < (tries || 200); k++) {
+            b = B.randomize(L.reels, L.rows, pool, rng);
+            probe.endBoard = b;
+            if (!LN.detect(probe).lines.length) { return { board: b, quiet: true }; }
+        }
+        return { board: b, quiet: false };
     };
 
     B.matchName = function (token, names) {
@@ -1018,6 +1056,9 @@ var SFS = SFS || {};
         if (L.cellW < 4 || L.cellH < 4) { e.push(T("格子寬高至少要 4px")); }
         if (L.gapX < 0 || L.gapY < 0 || L.peek < 0 || L.margin < 0) { e.push(T("間距 / 露出 / 留白不能是負數")); }
         if (L.symbolScale <= 0) { e.push(T("符號縮放必須大於 0")); }
+        for (i = 0; i < cfg.symbols.length; i++) {
+            if (!(S.entryScale(cfg.symbols[i]) > 0)) { e.push(T("符號「{0}」的縮放必須大於 0", cfg.symbols[i].name)); }
+        }
         if (P.startTime < 0) { e.push(T("開始時間不能是負數")); }
         var nonNeg = ["windupDist", "windupTime", "accelTime", "speedRamp"];
         for (i = 0; i < nonNeg.length; i++) {

@@ -249,8 +249,9 @@
         return base + "_" + (new Date().getTime());
     }
 
-    function symbolScale(item, L) {
-        var k = L.symbolScale / 100;
+    // pct = 這個符號自己的額外縮放 %（symbols[i].scale）
+    function symbolScale(item, L, pct) {
+        var k = L.symbolScale / 100 * (pct > 0 ? pct / 100 : 1);
         if (L.scaleMode === "fit" && item.width > 0 && item.height > 0) {
             var par = item.pixelAspect || 1;
             k *= Math.min(L.cellW / (item.width * par), L.cellH / item.height);
@@ -335,7 +336,7 @@
         ctrl.transform.position.dimensionsSeparated = true;
         setKeys(ctrl.transform.property("ADBE Position_1"), rp.keys);
 
-        var hasShy = false;
+        var hasShy = false, scales = S.symbolScales(cfg);
         for (var k = 0; k < rp.strip.length; k++) {
             var s = rp.strip[k];
             var item = map[s.name];
@@ -343,7 +344,7 @@
             lyr.name = S.layerNameFor(rp.index, s);
             lyr.parent = ctrl;
             lyr.transform.position.setValue(S.stripLocalPos(L, k));
-            var sc = symbolScale(item, L);
+            var sc = symbolScale(item, L, scales[s.name]);
             lyr.transform.scale.setValue([sc, sc]);
             lyr.motionBlur = mb;
             if (s.kind === "start") { lyr.label = 9; }
@@ -588,7 +589,7 @@
                 for (k = 0; k < pl.shows.length; k++) { cells[id].shows.push(pl.shows[k]); }
             }
         }
-        var up = 0.1, down = 0.22;
+        var up = 0.1, down = 0.22, scales = S.symbolScales(cfg);
         for (i = 0; i < order.length; i++) {
             var cell = cells[order[i]];
             var item = map[cfg.endBoard[cell.reel][cell.row]];
@@ -607,7 +608,7 @@
             var lyr = board.layers.add(item);
             lyr.name = "Win R" + (cell.reel + 1) + "-" + (cell.row + 1) + "_" + cfg.endBoard[cell.reel][cell.row];
             lyr.transform.position.setValue(S.cellCenter(L, cell.reel, cell.row));
-            var base = symbolScale(item, L), big = base * pulse / 100;
+            var base = symbolScale(item, L, scales[cfg.endBoard[cell.reel][cell.row]]), big = base * pulse / 100;
             fitDuration(lyr, item, spans[spans.length - 1].end);
             lyr.inPoint = spans[0].start;
             lyr.outPoint = spans[spans.length - 1].end;
@@ -652,6 +653,31 @@
         }
         return { files: out, error: "" };
     };
+
+    // 把盤面中心（= 格子中心）放到目標合成的 pos：錨點設在盤面合成中心，再設位置
+    function placeBoard(layer, plan, pos, result) {
+        var tr = layer.transform, comp = layer.containingComp;
+        var p = tr.position, xy = [pos[0], pos[1]];
+        if (p.numKeys > 0 || (p.dimensionsSeparated && (tr.property("ADBE Position_0").numKeys > 0 || tr.property("ADBE Position_1").numKeys > 0))) {
+            result.warnings.push(T("盤面圖層的位置有關鍵影格，沒有套用盤面位置 {0}", xy.join(", ")));
+            return;
+        }
+        if (tr.anchorPoint.numKeys === 0) {
+            var ap = [plan.boardW / 2, plan.boardH / 2];
+            if (layer.threeDLayer) { ap.push(tr.anchorPoint.value[2] || 0); }
+            tr.anchorPoint.setValue(ap);
+        }
+        if (p.dimensionsSeparated) {
+            tr.property("ADBE Position_0").setValue(xy[0]);
+            tr.property("ADBE Position_1").setValue(xy[1]);
+        } else {
+            if (layer.threeDLayer) { xy.push(p.value[2] || 0); }
+            p.setValue(xy);
+        }
+        if (comp && (pos[0] < 0 || pos[1] < 0 || pos[0] > comp.width || pos[1] > comp.height)) {
+            result.warnings.push(T("盤面位置 {0}, {1} 在合成「{2}」（{3}x{4}）外面", pos[0], pos[1], comp.name, comp.width, comp.height));
+        }
+    }
 
     A.findComp = function (name) {
         var found = null;
@@ -801,6 +827,9 @@
                 boardLayer = target.layers.add(boardComp);
                 boardLayer.transform.position.setValue([target.width / 2, target.height / 2]);
             }
+            // layout.position：建立和更新都放到指定位置；沒設定就維持置中 / 不動
+            var pos = S.parsePosition(L.position);
+            if (pos) { placeBoard(boardLayer, plan, pos, result); }
             if (host.ec) {
                 boardLayer.motionBlur = mb;
                 if (mb) { target.motionBlur = true; }
