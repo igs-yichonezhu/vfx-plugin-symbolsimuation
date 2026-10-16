@@ -7,6 +7,7 @@
  *  cli.test.js   agent 用的命令列（tools/sfs.js）與 AE 自動化入口（SlotFakeSpin_apply.jsx）
  *  i18n.test.js  介面語言（繁中 / 英文）：對照表完整、語言偵測、英文面板、切換語言
  *  ec.test.js    EffectCraft 後端（tools/ec.js、模擬 EffectCraft、假的 effectcraft-cli）
+ *  quick.test.js 快速模式：演出配方（S.recipes）與面板「快速」頁
  */
 "use strict";
 const H = require("./helpers");
@@ -16,5 +17,6 @@ require("./ui.test");
 require("./cli.test");
 require("./i18n.test");
 require("./ec.test");
+require("./quick.test");
 console.log("\n" + H.results.passed + " passed, " + H.results.failed + " failed");
 process.exit(H.results.failed ? 1 : 0);

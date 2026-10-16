@@ -6,7 +6,7 @@
 var SFS = SFS || {};
 
 (function (S) {
-    S.VERSION = "1.2.0";
+    S.VERSION = "1.3.0";
     S.NAME = "SlotFakeSpin";
     S.TAG = "SFS_BOARD";
 
@@ -398,6 +398,10 @@ var SFS = SFS || {};
                 cellSource: "builtin", // builtin / custom（中獎格改用自訂素材）
                 cellItemId: 0, cellItemName: "", cellPath: ""
             },
+            // 面板「快速」頁：選的演出配方（S.RECIPE_KEYS）
+            quick: {
+                recipe: "normal"
+            },
             // 盤面 [輪][列]，列 0 = 最上方
             startBoard: [],
             endBoard: []
@@ -462,7 +466,7 @@ var SFS = SFS || {};
                 });
             }
         }
-        var groups = ["layout", "spin", "antRule", "frame", "lineSet", "lineGen", "lineStyle"];
+        var groups = ["layout", "spin", "antRule", "frame", "lineSet", "lineGen", "lineStyle", "quick"];
         for (var g = 0; g < groups.length; g++) {
             out[groups[g]] = copyTyped(def[groups[g]], cfg[groups[g]]);
         }
@@ -475,6 +479,7 @@ var SFS = SFS || {};
         for (k = 0; k < ints.length; k++) { L[ints[k]] = Math.round(L[ints[k]]); }
         P.direction = oneOf(P.direction, ["down", "up"], "down");
         P.decelCurve = oneOf(P.decelCurve, S.CURVE_KEYS, "standard");
+        out.quick.recipe = oneOf(out.quick.recipe, S.RECIPE_KEYS, "normal");
         P.antCurve = oneOf(P.antCurve, S.CURVE_KEYS, "soft");
         out.lineGen.mode = oneOf(out.lineGen.mode, S.LINE_MODES, "all_each");
         out.frame.source = oneOf(out.frame.source, ["builtin", "custom"], "builtin");
@@ -1043,6 +1048,95 @@ var SFS = SFS || {};
         var res = AN.suggest(cfg);
         cfg.spin.antReels = res.reels.join(",");
         cfg.reels = S.generateReels(cfg);
+        return res;
+    };
+
+    // ------------------------------------------------------------------
+    // 演出配方（面板「快速」頁用）：照 .claude/skills/slot-fake-spin/reference/anticipation.md 第 3 節
+    // ------------------------------------------------------------------
+    S.RECIPE_KEYS = ["normal", "trigger", "miss", "tease", "turbo"];
+    S.RECIPE_LABELS = ["一般轉", "觸發（Scatter / 寶石…）", "期待落空", "大獎聽牌", "快速轉"];
+    var RC = S.recipes = {};
+    // 配方會動到的節奏參數：每次套用前先還原成一般轉的值，切換配方才不會殘留上一個的設定
+    var RECIPE_SPIN = ["firstStop", "stagger", "speeds", "decelTime", "decelCurve", "overshoot", "bounceTime",
+        "windupDist", "windupTime", "antReels", "antTime", "antSpeed", "antDecelTime", "antCurve"];
+
+    // 偵測結果盤面的連線並排好顯示時間
+    LN.detectInto = function (cfg) {
+        var res = LN.detect(cfg), out = [];
+        for (var i = 0; i < res.lines.length; i++) {
+            var d = S.lineDefaults();
+            d.pattern = res.lines[i].pattern;
+            d.count = res.lines[i].count;
+            d.boxOnly = !!res.lines[i].boxOnly;
+            out.push(d);
+        }
+        cfg.lines = LN.applyTiming(out, cfg.lineGen);
+        return res;
+    };
+
+    // 起始盤面是否「安靜」：填滿、沒有觸發符號、沒有連線（不會先讓人期待或以為中了）
+    B.isQuiet = function (cfg, board) {
+        var trig = S.parseNames(cfg.antRule.symbols), r, y;
+        for (r = 0; r < board.length; r++) {
+            for (y = 0; y < board[r].length; y++) {
+                if (!board[r][y] || U.indexOf(trig, board[r][y]) >= 0) { return false; }
+            }
+        }
+        var probe = { layout: cfg.layout, lineSet: cfg.lineSet, antRule: cfg.antRule, endBoard: board };
+        var res = LN.detect(probe);
+        for (r = 0; r < res.lines.length; r++) { if (!res.lines[r].scatter) { return false; } }
+        return true;
+    };
+
+    // key：S.RECIPE_KEYS 之一；opts：{ symbols, count（觸發 / 落空）, tease（聽牌）}
+    // 回傳 { key, reels: 期待輪（1 起算）, reasons, lines: 連線數 }
+    RC.apply = function (cfg, key, opts) {
+        opts = opts || {};
+        var P = cfg.spin, R = cfg.antRule, def = S.defaultConfig().spin, i;
+        if (U.indexOf(S.RECIPE_KEYS, key) < 0) { key = "normal"; }
+        for (i = 0; i < RECIPE_SPIN.length; i++) { P[RECIPE_SPIN[i]] = def[RECIPE_SPIN[i]]; }
+        if (opts.symbols !== undefined) { R.symbols = String(opts.symbols); }
+        if (opts.count !== undefined && Number(opts.count) >= 1) { R.count = Math.round(Number(opts.count)); }
+        if (opts.tease !== undefined) { R.tease = String(opts.tease); }
+        var res = { key: key, reels: [], reasons: [], lines: 0 };
+
+        if (key === "turbo") {
+            P.firstStop = 0.55; P.stagger = 0.1; P.speeds = "24"; P.decelCurve = "hard"; P.decelTime = 0.06;
+            P.overshoot = 0.08; P.bounceTime = 0.12; P.windupDist = 0.1; P.windupTime = 0.08;
+        } else if (key === "trigger" || key === "miss") {
+            R.after = true;
+            P.antTime = 0.9; P.antDecelTime = 0.55; P.antCurve = "soft"; P.antSpeed = 0;
+        } else if (key === "tease") {
+            P.antTime = 0.7; P.antSpeed = 24;
+        }
+        if (key === "trigger" || key === "miss" || key === "tease") {
+            var sug = AN.suggest(cfg);
+            res.reels = sug.reels;
+            res.reasons = sug.reasons;
+            P.antReels = sug.reels.join(",");
+        }
+        cfg.reels = S.generateReels(cfg);
+
+        // 一層比一層強：最後一個期待輪如果也是最後停的，再多拖 0.3 秒
+        if ((key === "trigger" || key === "miss") && res.reels.length >= 2) {
+            var steps = S.parseOrder(P.stopOrder, cfg.layout.reels), lastStep = steps[steps.length - 1];
+            var lastAnt = res.reels[res.reels.length - 1] - 1;
+            if (lastStep.length === 1 && lastStep[0] === lastAnt) { cfg.reels[lastAnt].stop = r3(cfg.reels[lastAnt].stop + 0.3); }
+        }
+
+        // 連線：落空不要任何中獎演出；觸發型一起亮久一點、符號跳大一點
+        if (key === "miss") {
+            cfg.lines = [];
+        } else {
+            if (key === "trigger") {
+                cfg.lineGen.delay = 0.2; cfg.lineGen.mode = "all"; cfg.lineGen.allTime = 1.8;
+                cfg.lineStyle.pulse = 120;
+            }
+            LN.detectInto(cfg);
+        }
+        res.lines = cfg.lines.length;
+        if (cfg.quick) { cfg.quick.recipe = key; }
         return res;
     };
 

@@ -460,7 +460,19 @@
         }
 
         // ================= 版面骨架 =================
-        var tabs = win.add("tabbedpanel");
+        // 外層：「快速」三步做完；「進階」是原本的 7 個分頁
+        var outer = win.add("tabbedpanel");
+        outer.alignChildren = ["fill", "top"];
+        var tQuick = outer.add("tab", undefined, T("快速"));
+        var tAdv = outer.add("tab", undefined, T("進階"));
+        tQuick.orientation = "column";
+        tQuick.alignChildren = ["fill", "top"];
+        tQuick.spacing = 6;
+        tQuick.margins = IS_EC ? [8, 34, 8, 8] : [8, 10, 8, 8];
+        tAdv.orientation = "column";
+        tAdv.alignChildren = ["fill", "top"];
+        tAdv.margins = IS_EC ? [4, 30, 4, 4] : [4, 6, 4, 4];
+        var tabs = tAdv.add("tabbedpanel");
         tabs.alignChildren = ["fill", "top"];
         var tSym = tabs.add("tab", undefined, T("符號"));
         var tBoard = tabs.add("tab", undefined, T("盤面"));
@@ -756,6 +768,46 @@
         checkField(f4, T("動態模糊"), "spin", "motionBlur");
         numField(f4, T("快門角度"), "spin", "shutterAngle", "", { min: 0, max: 720, integer: true, labelWidth: 52 });
 
+        // ================= 快速 =================
+        var pQ1 = section(tQuick, T("① 符號"));
+        var q1 = row(pQ1);
+        var qImport = q1.add("button", undefined, T("匯入符號資料夾…"));
+        qImport.helpTip = T("選一個資料夾，裡面的 PNG / JPG / PSD 等圖檔都會變成符號（檔名 = 符號名稱）");
+        var qAddSel = q1.add("button", undefined, T("加入專案中選取的素材"));
+        qAddSel.helpTip = T("把專案面板中選取的素材或合成（可做動態符號）加入符號庫");
+        var qSymInfo = pQ1.add("statictext", undefined, "", { multiline: true });
+        qSymInfo.preferredSize = [330, 2 * LINE_H];
+
+        var pQ2 = section(tQuick, T("② 結果盤面"));
+        var qBoard = pQ2.add("statictext", undefined, "", { multiline: true });
+        qBoard.preferredSize = [330, 4 * LINE_H];
+        var q2 = row(pQ2);
+        var qText = q2.add("button", undefined, T("文字輸入結果盤面…"));
+        qText.helpTip = T("用文字輸入盤面，可直接從 Excel / Google 試算表貼上");
+        var qPaint = q2.add("button", undefined, T("點格子畫…"));
+        qPaint.helpTip = T("到「進階 > 盤面」用畫筆點格子");
+        var q3 = row(pQ2);
+        var qStartInfo = q3.add("statictext", undefined, T("起始盤面：自動（不會中、不先期待）"));
+        var qReroll = q3.add("button", undefined, T("換一個"));
+
+        var pQ3 = section(tQuick, T("③ 演出"));
+        var q4 = row(pQ3);
+        var ddRecipe = q4.add("dropdownlist", undefined, S.tList(S.RECIPE_LABELS));
+        ddRecipe.selection = Math.max(0, U.indexOf(S.RECIPE_KEYS, st.cfg.quick.recipe));
+        ddRecipe.helpTip = T("一般轉：不期待。觸發：差一顆就開始期待、繞框，最後一輪再多拖一點，中了框住觸發符號。期待落空：一樣期待但最後沒中。大獎聽牌：同一條線連到一半就期待下一輪。快速轉：Turbo 節奏。");
+        var q5 = row(pQ3);
+        textField(q5, T("觸發符號"), "antRule", "symbols", { chars: IS_EC ? 16 : 12, after: applyQuick, tip: T("Scatter / Bonus 等觸發型符號，逗號分隔") });
+        numField(q5, "", "antRule", "count", T("顆觸發"), { min: 1, integer: true, chars: 2, after: applyQuick });
+        var q6 = row(pQ3);
+        textField(q6, T("聽牌符號"), "antRule", "tease", { chars: IS_EC ? 16 : 12, after: applyQuick, tip: T("大獎符號（例如 SEVEN）：同一條線從第 1 輪連到第 N 輪時，下一輪期待。空白 = 不判斷") });
+        var q7 = row(pQ3);
+        numField(q7, T("開始時間"), "spin", "startTime", T("秒"), { min: 0, tip: T("開始轉動的時間（目標合成的時間）。各輪的時間都從這裡起算") });
+        var qCTI = q7.add("button", undefined, T("取目前時間"));
+        var qSummary = pQ3.add("statictext", undefined, "", { multiline: true });
+        qSummary.preferredSize = [330, (IS_EC ? 5 : 4) * LINE_H];
+        addTimeline(pQ3);
+        hint(tQuick, T("最後按下方「▶ 建立假轉」。要細調節奏、繞框、連線樣式，到「進階」。"));
+
         // ================= 底部動作 =================
         var gAct = row(win);
         gAct.alignChildren = ["fill", "center"];
@@ -1021,6 +1073,7 @@
             try { plan = S.computePlan(st.cfg, currentFps(), { fillerPool: ["?"] }); } catch (e) { plan = null; }
             st.plan = plan;
             for (var i = 0; i < st.timelines.length; i++) { redraw(st.timelines[i]); }
+            refreshQuick();
             if (!plan) { info.text = ""; return; }
             if (plan.errors.length) { setMultiline(info, "⚠ " + plan.errors[0], 340, true); return; }
             var stops = [], maxV = 0;
@@ -1591,6 +1644,103 @@
         win.onResizing = win.onResize = function () {
             try { this.layout.resize(); } catch (e) { /* ignore */ }
         };
+        // ================= 快速頁事件 =================
+        function recipeKey() { return S.RECIPE_KEYS[ddRecipe.selection ? ddRecipe.selection.index : 0]; }
+        function boardSig() { return S.json.stringify([st.cfg.endBoard, names()]); }
+
+        // 起始盤面不安靜（有觸發符號、有連線、有空格）就換一個；force = 一定換
+        function ensureQuietStart(force) {
+            if (!st.cfg.symbols.length) { return; }
+            if (!force && S.board.isQuiet(st.cfg, st.cfg.startBoard)) { return; }
+            var res = S.board.randomQuiet(st.cfg, new S.Rng(randomSeed()), 200);
+            if (res.board) { st.cfg.startBoard = res.board; }
+        }
+
+        // 依選的演出重新產生節奏、期待輪、連線（觸發符號 / 幾顆 / 聽牌符號已經綁在設定上）
+        function applyQuick() {
+            if (!st.cfg.symbols.length) { refreshQuick(); return; }
+            var key = recipeKey();
+            var res = S.recipes.apply(st.cfg, key);
+            st.cfg.spin.autoRhythm = true;
+            ensureQuietStart(false);
+            st.quickSig = boardSig();
+            syncFields();
+            refreshReelList();
+            refreshLineList();
+            refreshCells();
+            persist();
+            updatePlan();
+            var reels = [];
+            for (var i = 0; i < res.reels.length; i++) { reels.push("R" + res.reels[i]); }
+            setStatus(T("已套用「{0}」：期待輪 {1}，連線 {2} 條", T(S.RECIPE_LABELS[U.indexOf(S.RECIPE_KEYS, key)]),
+                reels.length ? reels.join(T("、")) : T("無"), res.lines));
+        }
+
+        function refreshQuick() {
+            if (!qSummary) { return; }  // 快速頁還沒建好
+            var L = st.cfg.layout, key = recipeKey();
+            setMultiline(qSymInfo, st.cfg.symbols.length ? T("{0} 個符號：{1}", st.cfg.symbols.length, names().join("  ")) : T("還沒有符號：先匯入符號圖檔資料夾"), 330, true);
+            setMultiline(qBoard, st.cfg.symbols.length ? S.board.toText(st.cfg.endBoard, L.rows) : T("（匯入符號後會先亂數填滿，再改成你要的結果）"), 330, true);
+            q5.enabled = key === "trigger" || key === "miss";
+            q6.enabled = key === "tease";
+            var plan = st.plan, lines = [];
+            if (plan && !plan.errors.length && st.cfg.symbols.length) {
+                var ant = S.parseNumbers(st.cfg.spin.antReels), antTxt = [];
+                for (var i = 0; i < ant.length; i++) { antTxt.push("R" + ant[i]); }
+                lines.push(T("期待輪：{0}", antTxt.length ? antTxt.join(T("、")) : T("無")));
+                if (key === "trigger" || key === "miss" || key === "tease") {
+                    var sug = S.anticipation.suggest(st.cfg), perReel = {};
+                    for (var r in sug.byReel) {
+                        if (sug.byReel.hasOwnProperty(r)) { perReel[T("第 {0} 輪期待：{1}", r, sug.byReel[r])] = true; }
+                    }
+                    for (i = 0; i < sug.reasons.length; i++) { if (!perReel[sug.reasons[i]]) { lines.push(sug.reasons[i]); } }
+                }
+                lines.push(T("連線 {0} 條；全部停妥 {1} 秒、演出到 {2} 秒", st.cfg.lines.length, fmt2(plan.allSettled), fmt2(plan.endTime)));
+            }
+            setMultiline(qSummary, lines.join("\n"), 330, true);
+        }
+
+        ddRecipe.onChange = function () { applyQuick(); };
+        qImport.onClick = function () {
+            btnImport.onClick();
+            if (st.cfg.symbols.length) { applyQuick(); } else { refreshQuick(); }
+        };
+        qAddSel.onClick = function () {
+            btnAddSel.onClick();
+            if (st.cfg.symbols.length) { applyQuick(); } else { refreshQuick(); }
+        };
+        qText.onClick = function () {
+            if (!st.cfg.symbols.length) { setStatus(T("符號庫是空的")); return; }
+            st.editing = "end";
+            rbEnd.value = true;
+            rbStart.value = false;
+            refreshCells();
+            btnText.onClick();
+            applyQuick();
+        };
+        qPaint.onClick = function () {
+            outer.selection = tAdv;
+            tabs.selection = tBoard;
+            rbEnd.value = true;
+            rbStart.value = false;
+            rbEnd.onClick();
+        };
+        qReroll.onClick = function () {
+            ensureQuietStart(true);
+            refreshCells();
+            persist();
+            updatePlan();
+        };
+        qCTI.onClick = function () {
+            btnCTI.onClick();
+            syncFields();
+        };
+        // 回到快速頁時，如果在進階頁改過結果盤面或符號，重新套用演出
+        outer.onChange = function () {
+            if (outer.selection === tQuick && st.cfg.symbols.length && st.quickSig !== boardSig()) { applyQuick(); }
+            updatePlan();
+        };
+
         // 切換語言：清掉整個面板用新語言重建（浮動視窗則關掉重開），停在「設定」頁
         function rebuild() {
             persist();
@@ -1603,6 +1753,8 @@
             UI.create(thisObj, { tab: "settings" });
         }
 
+        st.quickSig = boardSig();  // 先記下目前盤面，切換分頁時才不會重新套用演出、蓋掉讀進來的設定
+        outer.selection = opts.tab === "settings" ? tAdv : tQuick;
         tabs.selection = opts.tab === "settings" ? tSet : (st.cfg.symbols.length ? tBoard : tSym);
         tabs.onChange = function () { updatePlan(); };
         refreshSymbols();

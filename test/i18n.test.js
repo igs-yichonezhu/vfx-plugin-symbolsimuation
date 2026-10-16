@@ -131,7 +131,7 @@ test("EffectCraft：面板自動用英文，看得到的文字沒有中文，完
   const main = ctx.app.project.items.addComp("Main", 1920, 1080, 1, 12, 30);
   ctx.app.project.activeItem = main;
   const panel = loadPanel(ctx);
-  deq(tabTitles(panel), ["Symbols", "Board", "Rhythm", "Reels", "Frame", "Lines", "Settings"]);
+  deq(tabTitles(panel), ["Quick", "Advanced", "Symbols", "Board", "Rhythm", "Reels", "Frame", "Lines", "Settings"]);
   ctx.__dialogResult = new ctx.Folder(SYMBOL_DIR);
   click(byText(panel, "button", "Import Folder..."));
   click(byText(panel, "button", "▶ Build Fake Spin"));
@@ -151,7 +151,7 @@ test("設定頁切換語言：重建面板、停在設定頁、記住選擇、�
   const main = ctx.app.project.items.addComp("Main", 1920, 1080, 1, 12, 30);
   ctx.app.project.activeItem = main;
   let panel = loadPanel(ctx);
-  assert.strictEqual(tabTitles(panel)[0], "符號");
+  assert.strictEqual(tabTitles(panel)[0], "快速");
   ctx.__dialogResult = new ctx.Folder(SYMBOL_DIR);
   click(byText(panel, "button", "匯入資料夾…"));
   const symbolsBefore = JSON.parse(ctx.app.settings.getSetting("SlotFakeSpin", "lastConfig_v2")).symbols.length;
@@ -159,24 +159,25 @@ test("設定頁切換語言：重建面板、停在設定頁、記住選擇、�
 
   pickLang(panel, 2);
   assert.strictEqual(ctx.app.settings.getSetting("SlotFakeSpin", "language"), "en");
-  deq(tabTitles(panel), ["Symbols", "Board", "Rhythm", "Reels", "Frame", "Lines", "Settings"]);
-  const tabs = find(panel, (el) => el.type === "tabbedpanel");
-  assert.strictEqual(tabs.selection.text, "Settings");
+  deq(tabTitles(panel), ["Quick", "Advanced", "Symbols", "Board", "Rhythm", "Reels", "Frame", "Lines", "Settings"]);
+  const tps = []; walk(panel, (el) => { if (el.type === "tabbedpanel") tps.push(el); });
+  assert.strictEqual(tps[0].selection.text, "Advanced");
+  assert.strictEqual(tps[1].selection.text, "Settings");
   assert.strictEqual(langDropdown(panel).selection.index, 2);
   const symList = find(panel, (el) => el.type === "listbox" && el.items.length && /^[●○] /.test(el.items[0].text));
   assert.strictEqual(symList.items.length, symbolsBefore, "symbols kept after rebuild");
   assert.strictEqual(panel.children.filter((c) => c.type === "tabbedpanel").length, 1, "old controls removed");
 
   pickLang(panel, 1);
-  assert.strictEqual(tabTitles(panel)[0], "符號");
+  assert.strictEqual(tabTitles(panel)[0], "快速");
   pickLang(panel, 0);
   assert.strictEqual(ctx.app.settings.getSetting("SlotFakeSpin", "language"), "auto");
-  assert.strictEqual(tabTitles(panel)[0], "符號", "auto + 沒有語系資訊 = 繁中");
+  assert.strictEqual(tabTitles(panel)[0], "快速", "auto + 沒有語系資訊 = 繁中");
 
   // 下次開面板沿用選擇
   ctx.app.settings.saveSetting("SlotFakeSpin", "language", "en");
   panel = loadPanel(ctx);
-  assert.strictEqual(tabTitles(panel)[0], "Symbols");
+  assert.strictEqual(tabTitles(panel)[0], "Quick");
 });
 
 test("自動化入口：工作參數 lang=en 時錯誤訊息是英文", () => {
