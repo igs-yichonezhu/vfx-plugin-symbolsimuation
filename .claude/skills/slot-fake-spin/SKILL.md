@@ -1,6 +1,6 @@
 ---
 name: slot-fake-spin
-description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、或美術的遊戲畫面 PSD，要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線，或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好（沒有 AE 時用 EffectCraft 建出盤面、檢查畫面與影片）。
+description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、或美術的遊戲畫面 PSD，要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線，或 Link 系列的 Hold & Spin 重轉（格子各自轉、金幣鎖住、多回合、SPINS REMAINING），或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好（沒有 AE 時用 EffectCraft 建出盤面、檢查畫面與影片）。
 ---
 
 # SlotFakeSpin：老虎機假轉
@@ -52,6 +52,19 @@ node tools/sfs.js symbols-sheet work/<案子>/preset.json work/<案子>/symbols.
 用 Read 看 `symbols.png`，記住每個符號的樣子。名稱太長或不好打就改名（`symbol P <名稱> --rename <短名>`）。
 `init` 會自動把檔名含 wild / scatter / bonus 的符號設成百搭 / 觸發型；確認對不對，不對用 `set` 改 `lineSet.wilds`、`lineSet.exclude`、`antRule.symbols`，並用 `symbol P <名稱> --filler off` 讓觸發型符號不要在轉動中亂數出現。
 
+**C. Hold & Spin（Link 系列重轉：格子各自轉、落下的金幣鎖住、空格每回合重轉、SPINS REMAINING 落下就重設）**
+
+整輪轉到結果盤面的假轉用 A / B；畫面是一格一格獨立的圓洞 / 格子、有「剩餘次數」燈時用這個模式。
+```
+node tools/sfs.js hs-init --symbols <符號資料夾> --out work/<案子>/preset.json --blank <空格符號> --grid <欄>x<列> --cell 240 --gap 33x18 [--start-spins 3]
+node tools/sfs.js hs-board work/<案子>/preset.json --start "- - 200 / - - MINI" --rounds "@3 - 200 - / 800 - -; @6.7 800 - - / - - -; ..."
+```
+- 要問清楚：格子欄 × 列、空格的圖（空格也是一個符號，例如紫色圓球）、開始時已經鎖住哪些、每回合落下什麼（看影片 / 企劃逐回合列出來）、開始剩幾次、重設成幾次。
+- 從影片讀：每回合「按下 PLAY / 格子開始轉」的秒數寫成 `@秒`，落下的格子用「列-欄」記；只剩 1 格在轉時通常是長的期待轉（`hs.antCells`、`spin.antTime`）。
+- 素材是 RGB 方圖時，轉動中格子之間會露出方形底：可以挖成圓形透明 PNG、背景圖把格子位置蓋掉（測試用，正式素材請美術給）。
+- 節奏用 `set hs.*` 調（見 [cli.md](reference/cli.md)「Hold & Spin」）；`check` 看回合表和每格停下時間，`render --boards` = 開始 + 每回合停妥的盤面，和影片逐回合比對。
+- Hold & Spin 沒有連線、期待感建議、逐輪微調（`lines` / `suggest` / `reel` 會擋）；接著跳到第 5 步檢查。
+
 ### 3. 讀盤面圖
 - **從 PSD 建的**：結果盤面就是 PSD 上的盤面（同一格疊了好幾個符號時取最上層，被蓋住的會列出來）。`render P --boards work/<案子>/boards.png` 產生圖，用 Read 和 PSD 畫面比對，再把文字格子回報給開發人員確認。要演別的結果時用 `board P --end` 改。
 - **其他**：照 [reading-boards.md](reference/reading-boards.md)：逐格讀 → `board` 寫入 → `render --boards` 產生圖 → 用 Read 看圖和原圖比對 → 把文字格子回報給開發人員確認。**有任何一格不確定就問。**
@@ -94,7 +107,8 @@ node tools/sfs.js ec P --project work/<案子>/<專案>.ecproj --comp "<合成�
 - 跑的是同一份套用腳本，盤面結構、轉輪關鍵影格和 AE 一致；`--mode` / `--board` 用法同 `ae`。
 - 專案不存在就建新的（盤面放進新的 `SFS_Main_01`）；存在時預設改寫原檔（備份在 `--out` 的 `before.ecproj`），不想動原檔就加 `--save-as`。
 - 盤面預設放目標合成中央，要對齊背景上的盤面位置用 `--pos x,y`（盤面中心的合成座標）。
-- 符號圖要在 .ecproj 所在資料夾裡（建議整個案子放 `work/<案子>/`）；不在時錯誤訊息會列出檔案，加 `--copy-assets` 自動複製。
+- 符號圖要在 .ecproj 所在資料夾裡（建議整個案子放 `work/<案子>/`）；不在時錯誤訊息會列出檔案，加 `--copy-assets` 自動複製。檔名結尾是數字的同系列圖（`C200.png`、`C400.png`）EffectCraft 會接成連續圖檔，`ec` 會自動複製到各自的資料夾（輸出會說明）。
+- 想在背景上看：先用 `effectcraft-cli script` 建一個和遊戲畫面一樣大的合成、最底層放背景圖（例如影片畫面），再 `ec --comp <那個合成>`；`layout.position` 設成盤面中心在畫面上的位置。
 - 回報的盤面合成名稱、標記、`frames/` 檢查畫面（EffectCraft 實際算圖）和影片用法同 `ae`：用 Read 看 2~3 張，影片用 SendUserFile 傳給開發人員。
 - 有 ⚠ 警告（例如畫不出連線、只留框格子）要轉告開發人員；已知差異見 [cli.md](reference/cli.md)「EffectCraft 已知限制」。最終交付仍以 AE 為準。
 
@@ -102,7 +116,7 @@ node tools/sfs.js ec P --project work/<案子>/<專案>.ecproj --comp "<合成�
 告訴開發人員：
 - AE 裡建好的盤面合成名稱，以及要再改時可以在 SlotFakeSpin 面板選取盤面圖層，按「讀取選取盤面」。
 - 設定檔路徑（面板可用「開設定…」打開）。
-- **音效對點表**：`ae` / `check` 列出的標記（秒 + 影格）。
+- **音效對點表**：`ae` / `check` 列出的標記（秒 + 影格）。Hold & Spin 是每回合起轉、每格停下 / 鎖住、剩餘次數重設、全滿。
 
 ## 原則
 - 先確認盤面正確，再談節奏；盤面讀錯，整段都要重做。

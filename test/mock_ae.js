@@ -459,7 +459,16 @@ function install(globalObj, opts) {
       const f = io.file;
       if (!f.exists) throw new Error("file missing " + f.fsName);
       const size = imageSizes[path.basename(f.fsName)] || [256, 256];
-      return this._add(new FootageItem(this, path.basename(f.fsName), size[0], size[1], f));
+      const item = this._add(new FootageItem(this, path.basename(f.fsName), size[0], size[1], f));
+      item.mainSource.isStill = true;
+      // EffectCraft 0.3.1 不理會 io.sequence = false：檔名結尾是數字、同資料夾有同名系列的圖檔會變成連續圖檔（從編號最小的那張開始）
+      const ext = path.extname(f.fsName), m = /^(.*?)\d+$/.exec(path.basename(f.fsName, ext));
+      if (ec && m) {
+        const re = new RegExp("^" + m[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(\\d+)" + ext.replace(".", "\\.") + "$", "i");
+        const seq = fs.readdirSync(path.dirname(f.fsName)).filter((n) => re.test(n)).sort((a, b) => Number(re.exec(a)[1]) - Number(re.exec(b)[1]));
+        if (seq.length > 1) item.mainSource = { file: new File(path.join(path.dirname(f.fsName), seq[0])), isStill: false };
+      }
+      return item;
     }
   }
 

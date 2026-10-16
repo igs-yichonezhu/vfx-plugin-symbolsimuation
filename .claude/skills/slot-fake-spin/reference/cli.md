@@ -21,6 +21,10 @@
 | 符號總覽 | `symbols-sheet <資料夾\|P> out.png` |
 | 送進 AE | `ae P --comp "合成名稱" [--mode auto\|new\|update] [--position x,y\|center] [--frames auto] [--out 資料夾]` |
 | 沒有 AE：EffectCraft | `ec P --project 專案.ecproj [--comp "合成名稱"] [--mode auto\|new\|update] [--pos x,y] [--frames auto] [--render out.mp4] [--save-as 另存.ecproj] [--copy-assets] [--out 資料夾]` |
+| Hold & Spin：建立 / 轉換 | `hs-init P --blank BLANK [--grid 3x2] [--cell 240] [--gap 33x18] [--spins 3] [--start-spins 1]`；新建：`hs-init --symbols <資料夾> --out P --blank BLANK ...` |
+| Hold & Spin：盤面與回合 | `hs-board P --start "- - 200 / - - MINI" --rounds "@3 - 200 - / 800 - -; @6.7 800 - - / - - -"`、`--add <回合>`、`--clear`（見下方「Hold & Spin」） |
+
+Hold & Spin 設定檔（`mode = holdspin`）不能用 `board` / `reel` / `regen` / `suggest` / `lines`（會提示改用 `hs-board` / `set hs.*`）；`show` / `check` / `render` / `ae` / `ec` 都支援。
 
 `ae` 的 `--mode`：
 - `auto`（預設）：合成裡有選取的盤面、或只有一個盤面就更新它；否則新建。
@@ -50,6 +54,28 @@
 回報內容同 `ae`，盤面合成名稱是 EffectCraft 裡的實際名稱（`--board` / 更新模式用這個名稱）。失敗時（找不到合成、腳本錯誤）專案不會被修改。
 
 找 CLI 的順序：環境變數 `SFS_EC` → `%LOCALAPPDATA%\Programs\ArtCraft\effectcraft-*\effectcraft-cli.exe`（最新版）→ PATH 上的 `effectcraft-cli`。
+
+## Hold & Spin（重轉模式，Link 系列）
+
+盤面是「欄 × 列」個獨立格子（`layout.reels` = 欄、`layout.rows` = 列），每格是一條 1 格高的轉帶；落下的符號鎖住不動，空格每回合重轉。
+格子用「列-欄」稱呼（`2-1` = 第 2 列第 1 欄），標記、`check`、回合摘要都這樣寫。
+
+```
+node tools/sfs.js hs-init --symbols work/<案子>/symbols --out work/<案子>/preset.json --blank BLANK --grid 3x2 --cell 240 --gap 33x18 --start-spins 1
+node tools/sfs.js hs-board work/<案子>/preset.json --start "- - C200 / - - MINI" \
+  --rounds "@3 - C200 - / C800 - -; @6.7 C800 - - / - - -; @9.25 - - - / - - -; @12.2 - - - / - C1200 -"
+node tools/sfs.js check work/<案子>/preset.json
+```
+
+- **起始盤面**（`--start`）：由上到下逐列、列之間用 `/`；`-` = 空格（存成空格符號 `hs.blank`），其他符號 = 一開始就鎖住。
+- **回合**（`--rounds`，命令列用 `;` 分隔回合，`@檔案` = 每行一回合）：同樣的盤面寫法，`-`（或空格符號）= 這回合還是空格，符號 = 這回合落下並鎖住；已鎖住的格子寫 `-` 或同一個符號都可以（所以「每回合寫出整個盤面」也行）。開頭 `@秒` = 這回合起轉時間（從 `spin.startTime` 算）；沒寫就接在上一回合停妥 + `hs.roundGap`。
+- **次數**：開始剩 `hs.startSpins` 次，每回合用掉 1 次，有新符號落下就重設成 `hs.spins`；用完或全滿就結束。結束後還有回合 = 錯誤；最後一回合沒結束 = 警告。
+- **節奏**：每回合所有空格一起起轉，依 `hs.order` 錯開停下（第 1 格 `hs.firstStop` 秒、之後每格 `hs.stagger`）。這回合只轉 ≤ `hs.antCells` 格時是**期待回合**：每格多轉 `spin.antTime`（累加）、改用 `spin.antDecelTime` / `antCurve`、`hs.antFrame` = 繞框（`spin.antSpeed` > 0 時繞框期間變速）。拉回 / 加速 / 減速 / 衝過 / 回彈 / 動態模糊沿用 `spin.*`，和轉輪模式同一套關鍵影格算法，停下位置分毫不差。
+- **鎖住跳動**：落下的符號停妥時在盤面合成放大到 `hs.lockPulse`% 再縮回（0.1 + 0.22 秒；100 = 不跳）。
+- **標記**：`HS START`、`HS ROUND n`、`HS SPINS k`（起轉後剩幾次；落下時 `HS SPINS 3` = 重設）、`HS CELL r-c STOP`（停下、還是空格）、`HS CELL r-c LOCK <符號>`、`HS CELL r-c FRAME`（期待繞框開始）、`HS FULL` / `HS END`（全滿 / 用完）、`ALL SETTLED`。剩餘次數的 UI（①②③）只打標記，畫面自己做。
+- **AE 結構**：每格一個格子合成 `<盤面>_C<列>-<欄>`（大小 = 格子；鎖住後沒有關鍵影格），盤面合成裡是 `Cell r-c` 圖層、`Frame Cr-c`（期待繞框）、`Lock r-c_<符號>`（鎖住跳動）。轉帶圖層：`C2-2_S01_BLANK`（起始）、`C2-2_H04_C1200`（第 4 回合停下的符號）、`F` 填充 / `B` 緩衝。
+- 不畫連線（有 `lines` 會警告並略過）；格子沒有 `peek`。
+- `check` 印回合表（起轉、第一格停、停妥、轉幾格、鎖住哪些、剩餘次數）、各格每次停下、文字時間軸（每格一行，`#` = 鎖住）、標記；`--json` 有 `rounds` / `cells` / `finalBoard`。`render --boards` = 開始 + 每回合停妥。`ae` / `ec` 另外回報每回合摘要（`result.rounds`）。
 
 ## from-psd
 
@@ -123,6 +149,23 @@ node tools/sfs.js from-psd <檔案.psd> --out work/<案子>/preset.json [選項]
 - `lineGen.delay`、`mode`（all_each / all / each）、`allTime`、`eachTime`、`gap`
 - `lineStyle.width`、`drawTime`、`full`、`boxes`、`boxWidth`、`pulse`（%）、`glow`、`cellSource` / `cellItemName`（自訂中獎格素材）
 
+### mode / hs（Hold & Spin）
+`mode`：`reels`（預設，整輪從起始盤面轉到結果盤面）/ `holdspin`（Hold & Spin 重轉）。`hs`：
+| 欄位 | 說明 | 預設 |
+| --- | --- | --- |
+| blank | 空格符號名稱 | 空（必填） |
+| rounds | 回合，每行一回合（`@秒 盤面`）；用 `hs-board` 改 | 空 |
+| spins / startSpins | 落下新符號重設成幾次 / 開始時剩幾次 | 3 / 3 |
+| speed | 轉速（格/秒） | 12 |
+| order | 停格順序：col（一欄一欄，上到下、左到右）/ row / all（同時） | col |
+| firstStop / stagger | 回合開始到第一格停 / 每格間隔 | 0.85 / 0.22 |
+| roundGap | 回合停妥到下一回合起轉（沒寫 `@秒` 時） | 1.2 |
+| antCells | 這回合轉的格子 ≤ 幾格時當期待回合（0 = 不期待） | 1 |
+| antFrame | 期待格繞框 | true |
+| lockPulse | 鎖住時跳動放大 %（100 = 不跳） | 115 |
+
+`endBoard` 在 Hold & Spin 是推演出來的最後盤面（`hs-board` 會寫入，給 `show` / 讀回用）。
+
 ### layout
 `reels rows cellW cellH gapX gapY peek margin scaleMode symbolScale target newCompFps position`
 - `position`：盤面中心在目標合成的位置 `[x, y]`；`null` = 新建時置中、更新時不動。
@@ -151,3 +194,4 @@ node tools/sfs.js from-psd <檔案.psd> --out work/<案子>/preset.json [選項]
 | 合成名稱不能和既有項目（含資料夾）重複，會自動改名（`SFS_Board_01` → `SFS_Board_ 2`） | 先建盤面合成再建同名資料夾（AE 也一樣這樣建）；回報實際名稱，轉輪合成用實際名稱命名 |
 | `render` 的 `--out` 相對路徑以 .ecproj 所在資料夾為準 | 一律傳絕對路徑 |
 | 圖層註解不會存進專案 | 不影響：盤面靠合成註解（設定 JSON）辨識 |
+| 不理會 `ImportOptions.sequence = false`：檔名結尾是數字、同資料夾有同系列檔案的圖（`C200.png`、`C400.png`、`MAJOR_2.png`、`MAJOR_3.png`）會被接成一段連續圖檔，畫面隨時間換成別張 | 這種符號圖自動複製到 `<專案資料夾>/sfs_assets/<設定檔名>/<檔名>/` 各自的資料夾再匯入（不用 `--copy-assets`，會印出哪些檔案）；在 EffectCraft 面板裡建立時則發出 ⚠ 警告 |

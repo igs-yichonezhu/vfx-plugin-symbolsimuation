@@ -1659,6 +1659,8 @@
         // 依選的演出重新產生節奏、期待輪、連線（觸發符號 / 幾顆 / 聽牌符號已經綁在設定上）
         function applyQuick() {
             if (!st.cfg.symbols.length) { refreshQuick(); return; }
+            // 演出配方只適用一般轉輪；Hold & Spin 設定不要動到它沿用的手感參數
+            if (st.cfg.mode === "holdspin") { setStatus(T("這是 Hold & Spin 設定：快速頁的演出只適用一般轉輪，請用命令列（hs-board）編輯")); return; }
             var key = recipeKey();
             var res = S.recipes.apply(st.cfg, key);
             st.cfg.spin.autoRhythm = true;

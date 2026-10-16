@@ -39,7 +39,9 @@ function writeResult() {
 }
 
 // 自動挑檢查畫面：開始、轉動中、每個標記（停輪 / 繞框 / 停妥）、每條連線顯示中
+// Hold & Spin：開始、每回合轉動中與停妥
 function autoShots(plan, offset) {
+    if (plan.mode === "holdspin") { return SFS.hs.shots(plan, offset); }
     var shots = [], i;
     for (i = 0; i < plan.markers.length; i++) {
         var m = plan.markers[i];
@@ -107,6 +109,20 @@ try {
         result.markers = [];
         for (var i = 0; i < res.plan.markers.length; i++) {
             result.markers.push({ t: res.plan.markers[i].t + offset, frame: Math.round((res.plan.markers[i].t + offset) * res.plan.fps), label: res.plan.markers[i].label });
+        }
+        // Hold & Spin：每回合的時間、鎖住的格子（列-欄）、剩餘次數
+        if (res.plan.mode === "holdspin") {
+            result.rounds = [];
+            for (i = 0; i < res.plan.rounds.length; i++) {
+                var rd = res.plan.rounds[i], locks = [];
+                for (var j = 0; j < rd.locks.length; j++) {
+                    var lc = res.plan.cells[rd.locks[j]];
+                    locks.push({ cell: lc.tag, symbol: lc.final });
+                }
+                result.rounds.push({ round: i + 1, start: rd.start + offset, settle: rd.settle + offset, cells: rd.cells.length,
+                    locks: locks, spinsLeft: rd.spinsLeft, spinsAfter: rd.spinsAfter, end: rd.end });
+            }
+            result.finalBoard = res.plan.finalBoard;
         }
         try { res.target.openInViewer(); res.target.time = Math.min(result.allSettled, res.target.duration); } catch (e1) { /* 舊版 AE */ }
         var shots = [];

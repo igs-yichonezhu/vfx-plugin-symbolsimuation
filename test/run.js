@@ -8,6 +8,7 @@
  *  i18n.test.js  介面語言（繁中 / 英文）：對照表完整、語言偵測、英文面板、切換語言
  *  ec.test.js    EffectCraft 後端（tools/ec.js、模擬 EffectCraft、假的 effectcraft-cli）
  *  quick.test.js 快速模式：演出配方（S.recipes）與面板「快速」頁
+ *  hs.test.js    Hold & Spin 重轉模式（推演、每格轉動計畫、模擬 AE 建置、命令列、EffectCraft）
  */
 "use strict";
 const H = require("./helpers");
@@ -18,5 +19,6 @@ require("./cli.test");
 require("./i18n.test");
 require("./ec.test");
 require("./quick.test");
+require("./hs.test");
 console.log("\n" + H.results.passed + " passed, " + H.results.failed + " failed");
 process.exit(H.results.failed ? 1 : 0);

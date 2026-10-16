@@ -171,3 +171,17 @@ test("快速頁：選一般轉時觸發 / 聽牌欄位停用，選觸發時啟�
   pickRecipe(panel, "期待落空");
   assert.strictEqual(trigRow.enabled, true);
 });
+
+test("快速頁：Hold & Spin 設定不套用演出配方", () => {
+  const { ctx, panel } = setup();
+  ctx.__dialogResult = new ctx.Folder(SYMBOL_DIR);
+  click(byText(panel, "button", "匯入符號資料夾…"));
+  const cfg = saved(ctx);
+  cfg.mode = "holdspin";
+  cfg.spin.antTime = 1.23;
+  ctx.app.settings.saveSetting("SlotFakeSpin", "lastConfig_v2", JSON.stringify(cfg));
+  const p2 = loadPanel(ctx);
+  pickRecipe(p2, "觸發（Scatter / 寶石…）");
+  assert.strictEqual(saved(ctx).spin.antTime, 1.23, "spin settings untouched");
+  assert.ok(find(p2, (el) => el.type === "statictext" && /Hold & Spin/.test(el.text)), "status explains");
+});

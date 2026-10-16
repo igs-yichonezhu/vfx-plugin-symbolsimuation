@@ -6,7 +6,7 @@
 var SFS = SFS || {};
 
 (function (S) {
-    S.VERSION = "1.3.0";
+    S.VERSION = "1.4.0";
     S.NAME = "SlotFakeSpin";
     S.TAG = "SFS_BOARD";
 
@@ -295,6 +295,9 @@ var SFS = SFS || {};
     S.LINE_MODE_LABELS = ["先全部再逐條", "全部一起", "逐條輪播"];
     S.LINE_COLORS = ["#FFD23C", "#3CDCFF", "#FF5A8C", "#78FF5A", "#B48CFF",
         "#FF9A3C", "#5AFFD2", "#FF3C3C", "#3C8CFF", "#F0F0F0"];
+    S.MODES = ["reels", "holdspin"];
+    var HS = S.hs = {};
+    HS.ORDERS = ["col", "row", "all"];
 
     // ------------------------------------------------------------------
     // 預設設定
@@ -402,6 +405,24 @@ var SFS = SFS || {};
             quick: {
                 recipe: "normal"
             },
+            // 盤面類型：reels = 整輪從起始盤面轉到結果盤面；holdspin = Hold & Spin 重轉（每格各自轉、鎖定、多回合）
+            mode: "reels",
+            // Hold & Spin（mode = holdspin）：layout.reels = 欄數、layout.rows = 列數，每格一條 1 格高的轉帶。
+            // 起始盤面裡的空格符號 = 空格，其他符號一開始就鎖住；手感（拉回 / 加速 / 減速 / 衝過 / 回彈 / 期待）沿用 spin。
+            hs: {
+                blank: "",             // 空格符號名稱（例如 BLANK）
+                rounds: "",            // 每回合一行：「@秒（可省略）盤面」，盤面由上到下逐列、列之間用 / 分隔，- = 這回合還是空格
+                spins: 3,              // 落下新符號就重設成幾次
+                startSpins: 3,         // 開始時剩幾次
+                speed: 12,             // 轉速（格/秒）
+                order: "col",          // 停格順序：col = 一欄一欄（上到下、左到右）；row = 一列一列；all = 同時
+                firstStop: 0.85,       // 回合開始到第一格停下（秒）
+                stagger: 0.22,         // 每格停下間隔（秒）
+                roundGap: 1.2,         // 回合停妥到下一回合起轉（秒；回合沒寫 @秒 時用）
+                antCells: 1,           // 這回合轉的格子 ≤ 幾格時當期待格（多轉 spin.antTime 秒）；0 = 不期待
+                antFrame: true,        // 期待格繞框
+                lockPulse: 115         // 鎖住時符號跳動放大 %，100 = 不跳
+            },
             // 盤面 [輪][列]，列 0 = 最上方
             startBoard: [],
             endBoard: []
@@ -466,10 +487,15 @@ var SFS = SFS || {};
                 });
             }
         }
-        var groups = ["layout", "spin", "antRule", "frame", "lineSet", "lineGen", "lineStyle", "quick"];
+        var groups = ["layout", "spin", "antRule", "frame", "lineSet", "lineGen", "lineStyle", "quick", "hs"];
         for (var g = 0; g < groups.length; g++) {
             out[groups[g]] = copyTyped(def[groups[g]], cfg[groups[g]]);
         }
+        out.mode = oneOf(cfg.mode, S.MODES, "reels");
+        out.hs.order = oneOf(out.hs.order, HS.ORDERS, "col");
+        out.hs.blank = U.trim(out.hs.blank);
+        var hsInts = ["spins", "startSpins", "antCells"];
+        for (k = 0; k < hsInts.length; k++) { out.hs[hsInts[k]] = Math.round(out.hs[hsInts[k]]); }
         var L = out.layout, P = out.spin;
         L.position = S.parsePosition(cfg.layout ? cfg.layout.position : null);
         L.reels = Math.round(U.clamp(L.reels, 1, 20));
@@ -1158,6 +1184,7 @@ var SFS = SFS || {};
         for (i = 0; i < nonNeg.length; i++) {
             if (P[nonNeg[i]] < 0) { e.push(T("手感參數不能是負數：{0}", nonNeg[i])); }
         }
+        if (cfg.mode === "holdspin") { return e.concat(HS.validate(cfg, names)); }
         var bw = L.reels * L.cellW + (L.reels - 1) * L.gapX + 2 * L.margin;
         var bh = S.reelHeight(L) + 2 * L.margin;
         if (bw > 30000 || bh > 30000) { e.push(T("盤面尺寸超過 AE 上限 30000px")); }
@@ -1223,6 +1250,7 @@ var SFS = SFS || {};
     S.INF_LINEAR = 100 / 3;
 
     S.computePlan = function (cfg, fps, opts) {
+        if (cfg.mode === "holdspin") { return HS.computePlan(cfg, fps, opts); }
         opts = opts || {};
         var L = cfg.layout, P = cfg.spin, F = cfg.frame;
         var errors = [], warnings = [];
@@ -1266,77 +1294,29 @@ var SFS = SFS || {};
             warnings: warnings
         };
 
+        var E = motionEnv(cfg, fps);
         for (var i = 0; i < reels; i++) {
             var R = reelCfg[i], tag = T("第 {0} 輪", i + 1);
-            var overshoot = (R.overshoot > 0 && R.bounceTime > 0) ? R.overshoot * L.cellH : 0;
-            var buffer = Math.ceil((L.peek + Math.max(windup, overshoot) + L.gapY) / pitch) + 1;
-            var tS = snap(T0 + R.start);
             var tStop = snap(T0 + R.stop);
-            var t1 = windup > 0 ? atLeast(snap(tS + P.windupTime), tS + frame) : tS;
-            var t2 = atLeast(snap(t1 + P.accelTime), t1 + frame);
-            var t3 = snap(tStop - R.decelTime);
-            if (t3 > tStop - frame + EPS) { t3 = tStop - frame; }
-            var t5 = overshoot > 0 ? atLeast(snap(tStop + R.bounceTime), tStop + frame) : tStop;
-            if (t2 > t3 + EPS) {
-                errors.push(T("{0}停得太早：從起轉到停輪至少要 {1} 秒（拉回+加速+減速）", tag, Math.round((t2 - tS + (tStop - t3)) * 100) / 100));
+            var mo = spinMotion(E, {
+                tS: snap(T0 + R.start), tStop: tStop, speed: R.speed, decelTime: R.decelTime, decelCurve: R.decelCurve,
+                overshoot: R.overshoot, bounceTime: R.bounceTime,
+                frameStart: R.frame && R.frameSpeed > 0 ? snap(T0 + R.frameStart) : -1, frameSpeed: R.frameSpeed
+            });
+            if (mo.tooShort) {
+                errors.push(T("{0}停得太早：從起轉到停輪至少要 {1} 秒（拉回+加速+減速）", tag, mo.tooShort));
                 continue;
             }
-
-            // 速度區段（名目速度，稍後等比例縮放）
-            var v1 = Math.max(0.01, R.speed) * pitch, vLast = v1;
-            var segs = [{ a: t1, b: t2, va: 0, vb: v1, d: v1 * (t2 - t1) / 2 }];
-            var tA = -1, tB = -1;
-            if (R.frame && R.frameSpeed > 0) {
-                tA = snap(T0 + R.frameStart);
-                tB = atLeast(snap(tA + P.speedRamp), tA + frame);
-            }
-            if (tA >= 0 && tA >= t2 - EPS && tB <= t3 + EPS) {
-                var v2 = R.frameSpeed * pitch;
-                if (tA - t2 > EPS) { segs.push({ a: t2, b: tA, va: v1, vb: v1, d: v1 * (tA - t2) }); }
-                segs.push({ a: tA, b: tB, va: v1, vb: v2, d: (v1 + v2) / 2 * (tB - tA) });
-                if (t3 - tB > EPS) { segs.push({ a: tB, b: t3, va: v2, vb: v2, d: v2 * (t3 - tB) }); }
-                vLast = v2;
-            } else {
-                if (tA >= 0) { warnings.push(T("{0}：繞框轉速的切換時間不在等速區段內，已忽略", tag)); }
-                if (t3 - t2 > EPS) { segs.push({ a: t2, b: t3, va: v1, vb: v1, d: v1 * (t3 - t2) }); }
-            }
-            var curve = S.CURVES[R.decelCurve] || S.CURVES.standard;
-            segs.push({ a: t3, b: tStop, va: vLast, vb: 0, d: curve.k * vLast * (tStop - t3), infA: curve.i1 * 100, infB: curve.i2 * 100 });
-
-            var nominal = 0, s;
-            for (s = 0; s < segs.length; s++) { nominal += segs[s].d; }
-            var fill = Math.round((nominal - windup - overshoot) / pitch - rows);
-            if (fill < minFill) { fill = minFill; }
-            var travel = windup + (rows + fill) * pitch + overshoot;
-            var scale = travel / nominal;
+            if (mo.rampIgnored) { warnings.push(T("{0}：繞框轉速的切換時間不在等速區段內，已忽略", tag)); }
+            var buffer = Math.ceil((L.peek + Math.max(windup, mo.overshoot) + L.gapY) / pitch) + 1;
+            var fit = fitTravel(E, mo, rows, minFill);
 
             // 轉帶內容
-            var strip = buildStrip(cfg.startBoard[i], cfg.endBoard[i], rows, fill, buffer, dir, pool, rng);
+            var strip = buildStrip(cfg.startBoard[i], cfg.endBoard[i], rows, fit.fill, buffer, dir, pool, rng);
             var y0 = L.peek - strip.startIndex * pitch;
             var yEnd = L.peek - strip.endIndex * pitch;
-
-            var keys = [], y = y0;
-            if (windup > 0) {
-                keys.push(mkKey(tS, y0, 0, S.INF_LINEAR, 0, 50));
-                y = y0 - dir * windup;
-                keys.push(mkKey(t1, y, 0, 50, 0, S.INF_LINEAR));
-            } else {
-                keys.push(mkKey(tS, y0, 0, S.INF_LINEAR, 0, S.INF_LINEAR));
-            }
-            for (s = 0; s < segs.length; s++) {
-                var sg = segs[s], last = keys[keys.length - 1];
-                last.outSpeed = dir * scale * sg.va;
-                last.outInf = sg.infA || S.INF_LINEAR;
-                y += dir * scale * sg.d;
-                keys.push(mkKey(sg.b, y, dir * scale * sg.vb, sg.infB || S.INF_LINEAR, dir * scale * sg.vb, S.INF_LINEAR));
-            }
-            var stopKey = keys[keys.length - 1];
-            stopKey.y = yEnd + dir * overshoot; // 消除浮點誤差
-            if (overshoot > 0) {
-                stopKey.outSpeed = 0;
-                stopKey.outInf = 40;
-                keys.push(mkKey(t5, yEnd, 0, 60, 0, S.INF_LINEAR));
-            }
+            var keys = [];
+            spinKeys(keys, mo, y0, yEnd, dir, fit.scale, windup);
 
             var rp = {
                 index: i,
@@ -1344,18 +1324,19 @@ var SFS = SFS || {};
                 strip: strip.items,
                 startIndex: strip.startIndex,
                 endIndex: strip.endIndex,
-                fill: fill,
-                speed: scale * Math.max(v1, vLast),
-                speeds: [scale * v1, scale * vLast],
+                fill: fit.fill,
+                speed: fit.scale * Math.max(mo.v1, mo.vLast),
+                speeds: [fit.scale * mo.v1, fit.scale * mo.vLast],
                 startY: y0,
                 endY: yEnd,
-                spinStart: tS,
-                accelEnd: t2,
-                decelStart: t3,
+                spinStart: mo.tS,
+                accelEnd: mo.t2,
+                decelStart: mo.t3,
                 stopTime: tStop,
-                settleTime: t5,
+                settleTime: mo.t5,
                 keys: keys
             };
+            var t5 = mo.t5;
             plan.reels.push(rp);
             plan.markers.push({ t: tStop, label: "R" + (i + 1) + " STOP" });
             if (t5 > plan.allSettled) { plan.allSettled = t5; }
@@ -1462,6 +1443,92 @@ var SFS = SFS || {};
         return { t: t, y: y, inSpeed: inSpeed, inInf: inInf, outSpeed: outSpeed, outInf: outInf };
     }
 
+    // ------------------------------------------------------------------
+    // 一次轉動：起轉 → 反向拉回 → 加速 → 等速 →[繞框變速]→ 減速 → 停輪(衝過頭) → 回彈
+    // 轉輪模式每輪轉一次；Hold & Spin 每格每回合轉一次（同一條轉帶接著轉）。
+    // ------------------------------------------------------------------
+    function motionEnv(cfg, fps) {
+        var L = cfg.layout, P = cfg.spin, frame = 1 / fps;
+        return {
+            P: P, frame: frame, EPS: 1e-9,
+            snap: function (t) { return Math.round(t * fps) / fps; },
+            atLeast: function (t, min) { return t < min - 1e-9 ? min : t; },
+            pitch: L.cellH + L.gapY,
+            cellH: L.cellH,
+            windup: (P.windupDist > 0 && P.windupTime > 0) ? P.windupDist * L.cellH : 0
+        };
+    }
+
+    // m：{ tS, tStop（已對齊影格）, speed（格/秒）, decelTime, decelCurve, overshoot（格）, bounceTime,
+    //      frameStart（已對齊影格；-1 = 不變速）, frameSpeed（格/秒）}
+    // 回傳時間點與速度區段（名目速度，fitTravel 再等比例縮放）；tooShort = 時間不夠時需要的最短秒數
+    function spinMotion(E, m) {
+        var P = E.P, frame = E.frame, EPS = E.EPS, snap = E.snap, atLeast = E.atLeast;
+        var overshoot = (m.overshoot > 0 && m.bounceTime > 0) ? m.overshoot * E.cellH : 0;
+        var tS = m.tS, tStop = m.tStop;
+        var t1 = E.windup > 0 ? atLeast(snap(tS + P.windupTime), tS + frame) : tS;
+        var t2 = atLeast(snap(t1 + P.accelTime), t1 + frame);
+        var t3 = snap(tStop - m.decelTime);
+        if (t3 > tStop - frame + EPS) { t3 = tStop - frame; }
+        var t5 = overshoot > 0 ? atLeast(snap(tStop + m.bounceTime), tStop + frame) : tStop;
+        if (t2 > t3 + EPS) { return { tooShort: Math.round((t2 - tS + (tStop - t3)) * 100) / 100 }; }
+
+        var v1 = Math.max(0.01, m.speed) * E.pitch, vLast = v1, rampIgnored = false;
+        var segs = [{ a: t1, b: t2, va: 0, vb: v1, d: v1 * (t2 - t1) / 2 }];
+        var tA = m.frameStart, tB = -1;
+        if (tA >= 0) { tB = atLeast(snap(tA + P.speedRamp), tA + frame); }
+        if (tA >= 0 && tA >= t2 - EPS && tB <= t3 + EPS) {
+            var v2 = m.frameSpeed * E.pitch;
+            if (tA - t2 > EPS) { segs.push({ a: t2, b: tA, va: v1, vb: v1, d: v1 * (tA - t2) }); }
+            segs.push({ a: tA, b: tB, va: v1, vb: v2, d: (v1 + v2) / 2 * (tB - tA) });
+            if (t3 - tB > EPS) { segs.push({ a: tB, b: t3, va: v2, vb: v2, d: v2 * (t3 - tB) }); }
+            vLast = v2;
+        } else {
+            rampIgnored = tA >= 0;
+            if (t3 - t2 > EPS) { segs.push({ a: t2, b: t3, va: v1, vb: v1, d: v1 * (t3 - t2) }); }
+        }
+        var curve = S.CURVES[m.decelCurve] || S.CURVES.standard;
+        segs.push({ a: t3, b: tStop, va: vLast, vb: 0, d: curve.k * vLast * (tStop - t3), infA: curve.i1 * 100, infB: curve.i2 * 100 });
+        var nominal = 0;
+        for (var s = 0; s < segs.length; s++) { nominal += segs[s].d; }
+        return { tS: tS, t1: t1, t2: t2, t3: t3, tStop: tStop, t5: t5, segs: segs, v1: v1, vLast: vLast,
+            overshoot: overshoot, nominal: nominal, rampIgnored: rampIgnored };
+    }
+
+    // 用名目速度算出要經過幾格（取整數），回傳 { fill, scale }：所有速度乘上 scale，停輪位置就分毫不差。
+    // rows = 視窗格數：轉輪 = 列數；Hold & Spin 一格 = 1（從目前的符號移到結果，中間經過 fill 格）
+    function fitTravel(E, mo, rows, minFill) {
+        var fill = Math.round((mo.nominal - E.windup - mo.overshoot) / E.pitch - rows);
+        if (fill < minFill) { fill = minFill; }
+        return { fill: fill, scale: (E.windup + (rows + fill) * E.pitch + mo.overshoot) / mo.nominal };
+    }
+
+    // 把一次轉動寫成關鍵影格，接在 keys 後面：從 y0 轉到 yEnd（停妥位置）
+    function spinKeys(keys, mo, y0, yEnd, dir, scale, windup) {
+        var y = y0, s;
+        if (windup > 0) {
+            keys.push(mkKey(mo.tS, y0, 0, S.INF_LINEAR, 0, 50));
+            y = y0 - dir * windup;
+            keys.push(mkKey(mo.t1, y, 0, 50, 0, S.INF_LINEAR));
+        } else {
+            keys.push(mkKey(mo.tS, y0, 0, S.INF_LINEAR, 0, S.INF_LINEAR));
+        }
+        for (s = 0; s < mo.segs.length; s++) {
+            var sg = mo.segs[s], last = keys[keys.length - 1];
+            last.outSpeed = dir * scale * sg.va;
+            last.outInf = sg.infA || S.INF_LINEAR;
+            y += dir * scale * sg.d;
+            keys.push(mkKey(sg.b, y, dir * scale * sg.vb, sg.infB || S.INF_LINEAR, dir * scale * sg.vb, S.INF_LINEAR));
+        }
+        var stopKey = keys[keys.length - 1];
+        stopKey.y = yEnd + dir * mo.overshoot; // 消除浮點誤差
+        if (mo.overshoot > 0) {
+            stopKey.outSpeed = 0;
+            stopKey.outInf = 40;
+            keys.push(mkKey(mo.t5, yEnd, 0, 60, 0, S.INF_LINEAR));
+        }
+    }
+
     // 隨機填充：避免同一個符號連續出現（符號庫只有 1 種時例外）
     function buildStrip(startCol, endCol, rows, fill, buffer, dir, pool, rng) {
         var items = [];
@@ -1502,9 +1569,399 @@ var SFS = SFS || {};
         return [L.cellW / 2, k * (L.cellH + L.gapY) + L.cellH / 2];
     };
 
-    S.layerNameFor = function (reelIndex, item) {
-        var prefix = { start: "S", end: "E", fill: "F", buffer: "B" }[item.kind] || "X";
-        return "R" + (reelIndex + 1) + "_" + prefix + U.pad(item.n, 2) + "_" + item.name;
+    // owner：圖層名稱開頭，預設 R<輪號>（Hold & Spin 的格子是 C<列>-<欄>）
+    // S = 起始、E = 結果、H = Hold & Spin 第幾回合停下的符號、F = 填充、B = 緩衝
+    S.layerNameFor = function (reelIndex, item, owner) {
+        var prefix = { start: "S", end: "E", round: "H", fill: "F", buffer: "B" }[item.kind] || "X";
+        return (owner || "R" + (reelIndex + 1)) + "_" + prefix + U.pad(item.n, 2) + "_" + item.name;
+    };
+
+    // ------------------------------------------------------------------
+    // Hold & Spin 重轉（cfg.mode = "holdspin"）
+    //
+    // 盤面是 layout.reels 欄 × layout.rows 列個獨立格子，每格是一條 1 格高的轉帶（格子沒有露出 peek）。
+    // 起始盤面：hs.blank（空格符號）= 空格，其他符號一開始就鎖住。
+    // hs.rounds 每行一回合（也可以用 ; 分隔）：「@秒」（可省略）+ 盤面。盤面由上到下逐列、列之間用 / 分隔
+    //   （不分列就要依序寫滿 欄×列 格）；- / . / 空格符號 = 這回合還是空格，符號名稱 = 這回合落下並鎖住，
+    //   已鎖住的格子寫 - 或同一個符號都可以。
+    // 每回合所有空格一起起轉、依 hs.order 錯開停下，鎖住的格子不再動；同一格每回合的轉動接在同一條轉帶上，
+    // 速度區段、減速曲線、衝過回彈都和轉輪模式相同（spinMotion），停下的位置分毫不差。
+    // 次數：每回合用掉 1 次，有新符號落下就重設成 hs.spins；用完或全滿就結束。
+    // 「@秒」從 spin.startTime 算；沒寫就接在上一回合停妥後 hs.roundGap 秒（第 1 回合 = 0）。
+    // ------------------------------------------------------------------
+    function isEmptyToken(tok, blank) {
+        return tok === "-" || tok === "." || (blank !== "" && String(tok).toLowerCase() === String(blank).toLowerCase());
+    }
+
+    function splitTokens(s) {
+        var parts = /[,\t]/.test(s) ? s.split(/[,\t]/) : U.trim(s).split(/\s+/), out = [];
+        for (var i = 0; i < parts.length; i++) { if (U.trim(parts[i]) !== "") { out.push(U.trim(parts[i])); } }
+        return out;
+    }
+
+    // 一回合（或起始盤面）的文字 -> { board: [欄][列]（"" = 空格）, errors }
+    HS.parseBoard = function (text, cols, rows, names, blank) {
+        var errors = [], board = B.create(cols, rows, ""), parts = String(text || "").split(/[\/|\r\n]+/), rowTokens = [], cells = [], i, c, r;
+        for (i = 0; i < parts.length; i++) {
+            if (U.trim(parts[i]) !== "") { rowTokens.push(splitTokens(parts[i])); }
+        }
+        if (rowTokens.length === 1 && rows > 1) {
+            cells = rowTokens[0];
+            if (cells.length !== cols * rows) {
+                errors.push(T("要有 {0} 格（{1} 欄 × {2} 列，由上到下逐列），目前有 {3} 格", cols * rows, cols, rows, cells.length));
+                return { board: board, errors: errors };
+            }
+        } else {
+            if (rowTokens.length !== rows) {
+                errors.push(T("要有 {0} 列（列之間用 / 分隔），目前有 {1} 列", rows, rowTokens.length));
+                return { board: board, errors: errors };
+            }
+            for (r = 0; r < rows; r++) {
+                if (rowTokens[r].length !== cols) { errors.push(T("第 {0} 列要有 {1} 格，目前有 {2} 格", r + 1, cols, rowTokens[r].length)); }
+                cells = cells.concat(rowTokens[r]);
+            }
+            if (errors.length) { return { board: board, errors: errors }; }
+        }
+        for (i = 0; i < cells.length; i++) {
+            c = i % cols;
+            r = Math.floor(i / cols);
+            if (isEmptyToken(cells[i], blank)) { continue; }
+            var m = B.matchName(cells[i], names);
+            if (m === null) { errors.push(T("第 {0} 列第 {1} 欄：找不到符號「{2}」", r + 1, c + 1, cells[i])); } else { board[c][r] = m; }
+        }
+        return { board: board, errors: errors };
+    };
+
+    // [欄][列] -> "- 200 - / 800 - -"（"" = -）
+    HS.boardText = function (board, rows) {
+        var out = [], comma = false, r, c;
+        for (c = 0; c < board.length; c++) {
+            for (r = 0; r < rows; r++) { if (/\s/.test(board[c][r] || "")) { comma = true; } }
+        }
+        for (r = 0; r < rows; r++) {
+            var cells = [];
+            for (c = 0; c < board.length; c++) { cells.push(board[c][r] || "-"); }
+            out.push(cells.join(comma ? ", " : " "));
+        }
+        return out.join(" / ");
+    };
+
+    // hs.rounds -> { rounds: [{ at: 秒 | null, board }], errors }
+    HS.parseRounds = function (cfg) {
+        var L = cfg.layout, names = S.symbolNames(cfg), lines = String(cfg.hs.rounds || "").split(/\r\n|\r|\n|;/);
+        var out = [], errors = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = U.trim(lines[i]), at = null, n = out.length + 1;
+            if (line === "" || line.charAt(0) === "#") { continue; }
+            if (line.charAt(0) === "@") {
+                var m = /^@\s*(\d*\.?\d+)\s*(.*)$/.exec(line);
+                if (m) {
+                    at = parseFloat(m[1]);
+                    line = m[2];
+                } else {
+                    errors.push(T("第 {0} 回合：時間格式是「@秒」，例如 @3.5", n));
+                    line = line.replace(/^@\S*\s*/, "");
+                }
+            }
+            var res = HS.parseBoard(line, L.reels, L.rows, names, cfg.hs.blank);
+            for (var k = 0; k < res.errors.length; k++) { errors.push(T("第 {0} 回合：{1}", n, res.errors[k])); }
+            out.push({ at: at, board: res.board });
+        }
+        return { rounds: out, errors: errors };
+    };
+
+    HS.roundsText = function (rounds, rows) {
+        var out = [];
+        for (var i = 0; i < rounds.length; i++) {
+            out.push((rounds[i].at !== null && rounds[i].at !== undefined ? "@" + r3(rounds[i].at) + " " : "") + HS.boardText(rounds[i].board, rows));
+        }
+        return out.join("\n");
+    };
+
+    // 停格順序：[[欄, 列], ...]；col = 一欄一欄（上到下、左到右），row = 一列一列（左到右、上到下）
+    HS.cellOrder = function (cols, rows, order) {
+        var out = [], c, r;
+        if (order === "row") {
+            for (r = 0; r < rows; r++) { for (c = 0; c < cols; c++) { out.push([c, r]); } }
+        } else {
+            for (c = 0; c < cols; c++) { for (r = 0; r < rows; r++) { out.push([c, r]); } }
+        }
+        return out;
+    };
+
+    // 依回合推演：每回合哪些格子轉（依停格順序）、落下什麼、剩幾次、什麼時候結束
+    // 回傳 { rounds: [{ index, at, spin: [[欄, 列, 落下的符號 | ""]...], locks: 鎖住幾格, spinsLeft（起轉後）, spinsAfter（回合結束）,
+    //        full, end: "" | "full"（全滿）| "out"（次數用完）}], board: [欄][列]（"" = 空格）, finalBoard（空格填空格符號）, ended, errors, warnings }
+    HS.simulate = function (cfg) {
+        var L = cfg.layout, H = cfg.hs, cols = L.reels, rows = L.rows, i, k, c, r;
+        var parsed = HS.parseRounds(cfg), errors = parsed.errors.slice(), warnings = [];
+        var cur = B.create(cols, rows, ""), order = HS.cellOrder(cols, rows, H.order), filled = 0;
+        for (c = 0; c < cols; c++) {
+            for (r = 0; r < rows; r++) {
+                var v = cfg.startBoard[c] ? cfg.startBoard[c][r] : "";
+                if (v && !isEmptyToken(v, H.blank)) { cur[c][r] = v; filled++; }
+            }
+        }
+        if (filled === cols * rows) { errors.push(T("起始盤面已經沒有空格（空格請放空格符號「{0}」）", H.blank)); }
+        if (!parsed.rounds.length) { errors.push(T("還沒有設定回合（hs.rounds，每行一回合）")); }
+        var left = H.startSpins, ended = "", out = [];
+        for (k = 0; k < parsed.rounds.length && !errors.length; k++) {
+            if (ended) {
+                errors.push(T("第 {0} 回合：Hold & Spin 在第 {1} 回合已經結束（{2}），後面不能再有回合", k + 1, k, ended === "full" ? T("全滿") : T("次數用完")));
+                break;
+            }
+            var pr = parsed.rounds[k], rd = { index: k, at: pr.at, spin: [], locks: 0 };
+            for (i = 0; i < order.length; i++) {
+                c = order[i][0];
+                r = order[i][1];
+                var want = pr.board[c][r];
+                if (cur[c][r]) {
+                    if (want && want !== cur[c][r]) {
+                        errors.push(T("第 {0} 回合：第 {1} 列第 {2} 欄已經鎖住「{3}」，不能換成「{4}」", k + 1, r + 1, c + 1, cur[c][r], want));
+                    }
+                    continue;
+                }
+                rd.spin.push([c, r, want]);
+            }
+            for (i = 0; i < rd.spin.length; i++) {
+                if (rd.spin[i][2]) { cur[rd.spin[i][0]][rd.spin[i][1]] = rd.spin[i][2]; filled++; rd.locks++; }
+            }
+            left -= 1;
+            rd.spinsLeft = left;
+            if (rd.locks) { left = H.spins; }
+            rd.spinsAfter = left;
+            rd.full = filled === cols * rows;
+            ended = rd.full ? "full" : (left <= 0 ? "out" : "");
+            rd.end = ended;
+            out.push(rd);
+        }
+        if (!errors.length && !ended && out.length) {
+            warnings.push(T("最後一回合（第 {0} 回合）後還剩 {1} 次、盤面也沒滿：演出停在這裡", out.length, left));
+        }
+        var fin = B.create(cols, rows, H.blank);
+        for (c = 0; c < cols; c++) {
+            for (r = 0; r < rows; r++) { if (cur[c][r]) { fin[c][r] = cur[c][r]; } }
+        }
+        return { rounds: out, board: cur, finalBoard: fin, ended: ended, errors: errors, warnings: warnings };
+    };
+
+    // 推演並把最後盤面寫進 endBoard（給 show / 讀回設定用）
+    HS.apply = function (cfg) {
+        var sim = HS.simulate(cfg);
+        if (!sim.errors.length) { cfg.endBoard = sim.finalBoard; }
+        return sim;
+    };
+
+    HS.validate = function (cfg, names) {
+        var e = [], L = cfg.layout, P = cfg.spin, H = cfg.hs;
+        var bw = L.reels * L.cellW + (L.reels - 1) * L.gapX + 2 * L.margin;
+        var bh = L.rows * L.cellH + (L.rows - 1) * L.gapY + 2 * L.margin;
+        if (bw > 30000 || bh > 30000) { e.push(T("盤面尺寸超過 AE 上限 30000px")); }
+        if (!H.blank) { e.push(T("請設定空格符號（hs.blank），例如空格圖案的符號名稱")); }
+        else if (names.length && U.indexOf(names, H.blank) < 0) { e.push(T("空格符號「{0}」不在符號庫裡", H.blank)); }
+        if (H.spins < 1 || H.startSpins < 1) { e.push(T("次數（hs.spins / hs.startSpins）至少要 1")); }
+        if (!(H.speed > 0)) { e.push(T("轉速（hs.speed）必須大於 0")); }
+        if (!(H.firstStop > 0)) { e.push(T("第一格停下時間（hs.firstStop）必須大於 0")); }
+        if (H.stagger < 0 || H.roundGap < 0 || H.antCells < 0) { e.push(T("停格間隔 / 回合間停頓 / 期待格數不能是負數")); }
+        if (P.decelTime < 0 || P.overshoot < 0 || P.bounceTime < 0 || P.antTime < 0 || P.antDecelTime < 0 || P.antSpeed < 0) {
+            e.push(T("減速 / 衝過 / 回彈 / 期待參數不能是負數"));
+        }
+        if (names.length) {
+            var be = B.validate(cfg.startBoard, L.reels, L.rows, names, T("起始盤面"));
+            e = e.concat(be);
+            if (!e.length) { e = e.concat(HS.simulate(cfg).errors); }
+        }
+        return e;
+    };
+
+    // 格子中心（盤面合成座標）
+    HS.cellCenter = function (L, c, r) {
+        return [L.margin + c * (L.cellW + L.gapX) + L.cellW / 2, L.margin + r * (L.cellH + L.gapY) + L.cellH / 2];
+    };
+
+    // 每格的轉動計畫。plan.cells[i]：{ index, row, col, tag: "列-欄", x, y, strip, startIndex, startY, keys,
+    //   spins: [{ round, start, stop, settle, decelStart, result, lock, ant, fill, speed, endY }], lockRound（0 = 一開始就鎖住、-1 = 沒鎖）}
+    // plan.rounds[k]：{ index, start, firstStop, settle, cells: [轉的格子], locks: [鎖住的格子], spinsLeft, spinsAfter, full, end, ant }
+    HS.computePlan = function (cfg, fps, opts) {
+        opts = opts || {};
+        var L = cfg.layout, P = cfg.spin, H = cfg.hs, F = cfg.frame, i, k, s;
+        var errors = [], warnings = [];
+        if (!(fps > 0)) { return { errors: [T("影格速率錯誤")], warnings: [] }; }
+        var E = motionEnv(cfg, fps), snap = E.snap, EPS = E.EPS, frame = E.frame;
+        var cols = L.reels, rows = L.rows, pitch = E.pitch, windup = E.windup;
+        var dir = P.direction === "up" ? -1 : 1;
+        var T0 = snap(P.startTime - (opts.timeOffset || 0));
+        var gridW = cols * L.cellW + (cols - 1) * L.gapX, gridH = rows * L.cellH + (rows - 1) * L.gapY;
+        var sim = HS.simulate(cfg);
+        var plan = {
+            mode: "holdspin", fps: fps, pitch: pitch, cellW: L.cellW, cellH: L.cellH, reelW: L.cellW, reelH: L.cellH,
+            margin: L.margin, reelsW: gridW, boardW: gridW + 2 * L.margin, boardH: gridH + 2 * L.margin, direction: dir,
+            startTime: T0, reels: [], cells: [], rounds: [], frames: [], lines: [], pulses: [],
+            markers: [{ t: T0, label: "HS START" }], allSettled: T0, endTime: T0,
+            board: sim.board, finalBoard: sim.finalBoard, ended: sim.ended, errors: errors, warnings: warnings
+        };
+        for (i = 0; i < sim.errors.length; i++) { errors.push(sim.errors[i]); }
+        if (errors.length) { return plan; }
+        for (i = 0; i < sim.warnings.length; i++) { warnings.push(sim.warnings[i]); }
+        if (cfg.lines.length) { warnings.push(T("Hold & Spin 模式不畫連線，已略過 {0} 條連線", cfg.lines.length)); }
+
+        var cells = [], c, r;
+        for (r = 0; r < rows; r++) {
+            for (c = 0; c < cols; c++) {
+                var ctr = HS.cellCenter(L, c, r), st = cfg.startBoard[c][r];
+                cells.push({ index: cells.length, row: r, col: c, tag: (r + 1) + "-" + (c + 1), x: ctr[0], y: ctr[1], start: st,
+                    spins: [], lockRound: isEmptyToken(st, H.blank) ? -1 : 0, lockTime: -1, busyUntil: -1e9 });
+            }
+        }
+
+        var ant = Math.max(0, H.antCells), prevSettle = T0;
+        for (k = 0; k < sim.rounds.length; k++) {
+            var sr = sim.rounds[k], n = k + 1;
+            var tR = snap(T0 + (sr.at !== null ? sr.at : (k ? prevSettle - T0 + H.roundGap : 0)));
+            var rd = { index: k, start: tR, firstStop: -1, settle: tR, cells: [], locks: [], spinsLeft: sr.spinsLeft,
+                spinsAfter: sr.spinsAfter, full: sr.full, end: sr.end, ant: ant > 0 && sr.spin.length <= ant };
+            plan.markers.push({ t: tR, label: "HS ROUND " + n });
+            plan.markers.push({ t: tR, label: "HS SPINS " + sr.spinsLeft });
+            var extra = 0, prevStop = -1, reset = false;
+            for (i = 0; i < sr.spin.length; i++) {
+                var cell = cells[sr.spin[i][1] * cols + sr.spin[i][0]], res = sr.spin[i][2];
+                if (rd.ant) { extra += P.antTime; }
+                var tStop = snap(tR + H.firstStop + (H.order === "all" ? 0 : i * H.stagger) + extra);
+                if (tR < cell.busyUntil + frame - EPS) {
+                    errors.push(T("第 {0} 回合開始得太早：格子 {1}（列-欄）在 {2} 秒才停妥", n, cell.tag, Math.round((cell.busyUntil - T0) * 100) / 100));
+                    continue;
+                }
+                var fs = rd.ant ? (prevStop >= 0 ? prevStop : snap(tR + P.windupTime + P.accelTime)) : -1;
+                var mo = spinMotion(E, {
+                    tS: tR, tStop: tStop, speed: H.speed, decelTime: rd.ant ? P.antDecelTime : P.decelTime,
+                    decelCurve: rd.ant ? P.antCurve : P.decelCurve, overshoot: P.overshoot, bounceTime: P.bounceTime,
+                    frameStart: rd.ant && P.antSpeed > 0 ? fs : -1, frameSpeed: P.antSpeed
+                });
+                if (mo.tooShort) {
+                    errors.push(T("第 {0} 回合格子 {1} 停得太早：從起轉到停下至少要 {2} 秒（拉回+加速+減速）", n, cell.tag, mo.tooShort));
+                    continue;
+                }
+                if (mo.rampIgnored) { warnings.push(T("第 {0} 回合格子 {1}：期待轉速的切換時間不在等速區段內，已忽略", n, cell.tag)); }
+                var fit = fitTravel(E, mo, 1, 2);
+                cell.spins.push({ round: k, mo: mo, scale: fit.scale, fill: fit.fill, result: res || H.blank, lock: !!res, ant: rd.ant });
+                cell.busyUntil = mo.t5;
+                rd.cells.push(cell.index);
+                if (rd.firstStop < 0 || tStop < rd.firstStop) { rd.firstStop = tStop; }
+                if (mo.t5 > rd.settle) { rd.settle = mo.t5; }
+                if (res) {
+                    rd.locks.push(cell.index);
+                    cell.lockRound = n;
+                    cell.lockTime = tStop;
+                    plan.markers.push({ t: tStop, label: "HS CELL " + cell.tag + " LOCK " + res });
+                    if (!reset) { reset = true; plan.markers.push({ t: tStop, label: "HS SPINS " + H.spins }); }
+                    if (H.lockPulse > 100) { plan.pulses.push({ cell: cell.index, name: res, t: mo.t5, x: cell.x, y: cell.y }); }
+                } else {
+                    plan.markers.push({ t: tStop, label: "HS CELL " + cell.tag + " STOP" });
+                }
+                if (rd.ant && H.antFrame) {
+                    if (fs >= tStop - EPS) {
+                        errors.push(T("第 {0} 回合格子 {1}：繞框開始時間必須早於停下時間", n, cell.tag));
+                    } else {
+                        plan.frames.push({ reel: -1, cell: cell.index, name: "Frame C" + cell.tag, start: fs, end: snap(mo.t5 + Math.max(0, F.hold)),
+                            x: cell.x, y: cell.y, w: L.cellW + 2 * F.pad, h: L.cellH + 2 * F.pad });
+                        plan.markers.push({ t: fs, label: "HS CELL " + cell.tag + " FRAME" });
+                    }
+                }
+                prevStop = tStop;
+            }
+            if (sr.end === "full") { plan.markers.push({ t: rd.settle, label: "HS FULL" }); }
+            else if (sr.end === "out") { plan.markers.push({ t: rd.settle, label: "HS END" }); }
+            prevSettle = rd.settle;
+            if (rd.settle > plan.allSettled) { plan.allSettled = rd.settle; }
+            plan.rounds.push(rd);
+        }
+
+        // 轉帶與關鍵影格：同一格每回合的轉動接在同一條轉帶上，回合之間停住不動
+        var pool = opts.fillerPool || S.fillerPool(cfg), rng = new S.Rng(P.seed);
+        var overshootPx = (P.overshoot > 0 && P.bounceTime > 0) ? P.overshoot * L.cellH : 0;
+        var buffer = Math.ceil((Math.max(windup, overshootPx) + L.gapY) / pitch) + 1;
+        for (i = 0; i < cells.length; i++) {
+            var cl = cells[i], strip = buildCellStrip(cl, buffer, dir, pool, rng);
+            var keys = [], y = -strip.startIndex * pitch, spins = [];
+            var startY = y;
+            for (s = 0; s < cl.spins.length; s++) {
+                var sp = cl.spins[s], yEnd = -strip.resultIndex[s] * pitch;
+                spinKeys(keys, sp.mo, y, yEnd, dir, sp.scale, windup);
+                spins.push({ round: sp.round, start: sp.mo.tS, stop: sp.mo.tStop, settle: sp.mo.t5, decelStart: sp.mo.t3,
+                    result: sp.result, lock: sp.lock, ant: sp.ant, fill: sp.fill, speed: sp.scale * Math.max(sp.mo.v1, sp.mo.vLast),
+                    stripIndex: strip.resultIndex[s], endY: yEnd });
+                y = yEnd;
+            }
+            plan.cells.push({ index: cl.index, row: cl.row, col: cl.col, tag: cl.tag, x: cl.x, y: cl.y, start: cl.start,
+                final: plan.finalBoard[cl.col][cl.row], strip: strip.items, startIndex: strip.startIndex, startY: startY,
+                keys: keys, spins: spins, lockRound: cl.lockRound, lockTime: cl.lockTime });
+        }
+
+        plan.endTime = plan.allSettled;
+        for (i = 0; i < plan.frames.length; i++) { plan.endTime = Math.max(plan.endTime, plan.frames[i].end + Math.max(0, F.fade)); }
+        for (i = 0; i < plan.pulses.length; i++) { plan.endTime = Math.max(plan.endTime, plan.pulses[i].t + HS.PULSE_UP + HS.PULSE_DOWN); }
+        if (!errors.length) { plan.markers.push({ t: plan.allSettled, label: "ALL SETTLED" }); }
+        plan.markers = mergeMarkers(plan.markers);
+        return plan;
+    };
+
+    // 鎖住時符號跳動：放大 0.1 秒、縮回 0.22 秒（和中獎符號跳動一樣）
+    HS.PULSE_UP = 0.1;
+    HS.PULSE_DOWN = 0.22;
+
+    // 一格的轉帶：時間順序是 [起始][填充][第 1 次停下][填充][第 2 次停下]…；向下轉時由上到下反過來排（null 往下移看到上面的格子）
+    function buildCellStrip(cell, buffer, dir, pool, rng) {
+        var seq = [{ name: cell.start, kind: "start", n: 1 }], resultAt = [], last = cell.start, fillN = 0, i, k;
+        function pick(avoid) {
+            var name = rng.pick(pool), guard = 0;
+            while (pool.length > 1 && (name === last || name === avoid) && guard++ < 16) { name = rng.pick(pool); }
+            last = name;
+            return name;
+        }
+        for (k = 0; k < cell.spins.length; k++) {
+            var sp = cell.spins[k];
+            for (i = 0; i < sp.fill; i++) { seq.push({ name: pick(i === sp.fill - 1 ? sp.result : null), kind: "fill", n: ++fillN }); }
+            resultAt.push(seq.length);
+            seq.push({ name: sp.result, kind: "round", n: sp.round + 1, lock: sp.lock });
+            last = sp.result;
+        }
+        // 兩端的緩衝（拉回、衝過頭時會露出來）：第一個是緊鄰的那格
+        function bufferRun(from) {
+            var out = [];
+            last = from;
+            for (var b = 0; b < buffer; b++) { out.push({ name: pick(null), kind: "buffer", n: 0 }); }
+            return out;
+        }
+        var nearStart = bufferRun(cell.start), nearEnd = bufferRun(seq[seq.length - 1].name);
+        var top = dir > 0 ? nearEnd.reverse() : nearStart.reverse();
+        var items = top.concat(dir > 0 ? seq.slice().reverse() : seq, dir > 0 ? nearStart : nearEnd);
+        var bufN = 0;
+        for (i = 0; i < items.length; i++) { if (items[i].kind === "buffer") { items[i].n = ++bufN; } }
+        function indexOf(j) { return top.length + (dir > 0 ? seq.length - 1 - j : j); }
+        var resultIndex = [];
+        for (k = 0; k < resultAt.length; k++) { resultIndex.push(indexOf(resultAt[k])); }
+        return { items: items, startIndex: indexOf(0), resultIndex: resultIndex };
+    }
+
+    // 檢查畫面：開始、每回合轉動中與停妥；offset = 盤面圖層的起點
+    HS.shots = function (plan, offset) {
+        offset = offset || 0;
+        var shots = [], out = [], i;
+        if (!plan.rounds.length || plan.rounds[0].firstStop < 0 || plan.rounds[0].start > plan.startTime + 1e-6) {
+            shots.push({ t: plan.startTime, label: "HS START" });
+        }
+        for (i = 0; i < plan.rounds.length; i++) {
+            var rd = plan.rounds[i], n = i + 1;
+            if (rd.firstStop > rd.start) { shots.push({ t: (rd.start + rd.firstStop) / 2, label: "ROUND " + n + " SPINNING" }); }
+            shots.push({ t: rd.settle, label: "ROUND " + n + " SETTLED" + (rd.full ? " / FULL" : (rd.end === "out" ? " / END" : "")) });
+        }
+        shots.sort(function (a, b) { return a.t - b.t; });
+        for (i = 0; i < shots.length; i++) {
+            var lastShot = out[out.length - 1];
+            if (lastShot && Math.abs(lastShot.t - shots[i].t - offset) < 1e-6) { lastShot.label += " / " + shots[i].label; }
+            else { out.push({ t: shots[i].t + offset, label: shots[i].label }); }
+        }
+        return out;
     };
 })(SFS);
 

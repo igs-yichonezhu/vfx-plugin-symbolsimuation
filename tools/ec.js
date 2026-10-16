@@ -9,6 +9,8 @@
  *  - 腳本只能讀 .ecproj 所在資料夾裡的檔案：設定內容直接帶進腳本；素材要在專案資料夾內（或用 --copy-assets 複製進去）
  *  - 腳本出錯時 CLI 一樣會存檔：先另存成暫存檔，成功才取代專案（原檔備份到執行資料夾）
  *  - render 的 --out 相對路徑以 .ecproj 所在資料夾為準：一律傳絕對路徑
+ *  - 不理會 ImportOptions.sequence = false：檔名結尾是數字的同系列圖檔（C200.png、C400.png…）會被接成連續圖檔，
+ *    這種符號圖複製到 sfs_assets/<名稱>/<檔名>/ 各自的資料夾再匯入
  * 畫線（shape.newPath）、巢狀動態模糊、合成同名自動改名在 src/ae.js 偵測到 EffectCraft 時處理。
  */
 "use strict";
@@ -128,17 +130,30 @@ function sameFile(a, b) {
   return sa.size === sb.size && fs.readFileSync(a).equals(fs.readFileSync(b));
 }
 
-// 把專案資料夾外的素材複製到 <專案資料夾>/sfs_assets/<名稱>/，並改寫設定裡的路徑；回傳 [{ from, to }]
+// EffectCraft 0.3.1 不理會 ImportOptions.sequence = false：檔名結尾是數字、同資料夾還有同系列檔案的圖
+//（C200.png、C400.png、C1200.png）會被匯入成一段連續圖檔，畫面隨時間換成別張
+const endsWithDigits = (file) => /\d$/.test(path.basename(file, path.extname(file)));
+function sequenceProne(file) {
+  const ext = path.extname(file), m = /^(.*?)\d+$/.exec(path.basename(file, ext));
+  if (!m || !fs.existsSync(path.dirname(file))) return false;
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp("^" + esc(m[1]) + "\\d+" + esc(ext) + "$", "i");
+  return fs.readdirSync(path.dirname(file)).some((f) => re.test(f) && f.toLowerCase() !== path.basename(file).toLowerCase());
+}
+
+// 把素材複製到 <專案資料夾>/sfs_assets/<名稱>/，並改寫設定裡的路徑；回傳 [{ from, to }]
+// 檔名結尾是數字的放進各自的資料夾（<名稱>/<檔名>/），EffectCraft 才不會把它們接成連續圖檔
 function copyAssets(refs, projDir, name) {
-  const dir = path.join(projDir, ASSET_DIR, name);
-  fs.mkdirSync(dir, { recursive: true });
+  const base = path.join(projDir, ASSET_DIR, name);
   const done = {}, out = [];
   refs.forEach((ref) => {
     const from = path.resolve(ref.get());
     if (!done[from]) {
       const ext = path.extname(from), stem = path.basename(from, ext);
-      let to = path.join(dir, stem + ext);
-      for (let n = 2; fs.existsSync(to) && !sameFile(from, to); n++) to = path.join(dir, stem + "_" + n + ext);
+      const place = (s) => path.join(endsWithDigits(s + ext) ? path.join(base, s) : base, s + ext);
+      let to = place(stem);
+      for (let n = 2; fs.existsSync(to) && !sameFile(from, to); n++) to = place(stem + "_" + n);
+      fs.mkdirSync(path.dirname(to), { recursive: true });
       if (!fs.existsSync(to)) fs.copyFileSync(from, to);
       done[from] = to;
       out.push({ from, to });
@@ -150,6 +165,15 @@ function copyAssets(refs, projDir, name) {
 
 function frameFile(dir, i, label) {
   return path.join(dir, String(i + 1).padStart(2, "0") + "_" + String(label).replace(/[^\w\-]+/g, "_") + ".png");
+}
+
+// Hold & Spin 的回合摘要（套用腳本回傳的 result.rounds；sfs.js ae 也用）
+function printRounds(res) {
+  if (!res.rounds) return;
+  console.log("Hold & Spin 回合（格子 = 列-欄）：");
+  res.rounds.forEach((rd) => console.log("  " + pad("R" + rd.round, 5) + pad(r2(rd.start).toFixed(2) + "s → " + r2(rd.settle).toFixed(2) + "s", 18) +
+    pad("轉 " + rd.cells + " 格", 9) + pad("鎖住 " + (rd.locks.map((l) => l.cell + " " + l.symbol).join("、") || "-"), 30) +
+    "剩 " + rd.spinsLeft + (rd.locks.length ? " → " + rd.spinsAfter : "") + (rd.end === "full" ? "　全滿" : rd.end === "out" ? "　用完" : "")));
 }
 
 // ---------------------------------------------------------------- 指令
@@ -221,6 +245,17 @@ function cmdEC(file, opt, deps) {
     const copied = copyAssets(outside, projDir, assetName);
     console.log("已把 " + copied.length + " 個素材複製到 " + path.join(projDir, ASSET_DIR, assetName));
   }
+  // 專案資料夾裡會被接成連續圖檔的符號圖：複製到各自的資料夾（不用 --copy-assets 也做，不然畫面會錯）
+  const isolate = refs.filter((r) => isInside(projDir, r.get()) && sequenceProne(r.get()));
+  if (isolate.length) {
+    const what = isolate.map((r) => path.basename(r.get())).join("、");
+    if (opt["dry-run"]) {
+      console.log("（--dry-run：" + what + " 在 EffectCraft 會被接成連續圖檔，正式執行時會複製到 " + path.join(projDir, ASSET_DIR, assetName) + " 的各自資料夾）");
+    } else {
+      copyAssets(isolate, projDir, assetName);
+      console.log("EffectCraft 會把檔名結尾是數字的同系列圖檔接成連續圖檔：" + what + " 已複製到 " + path.join(projDir, ASSET_DIR, assetName) + " 的各自資料夾");
+    }
+  }
 
   const job = {
     config: run, base: path.dirname(path.resolve(file)), mode, comp: str("comp"), board: str("board"),
@@ -282,6 +317,7 @@ function cmdEC(file, opt, deps) {
   console.log("全部停妥 " + r2(res.allSettled) + " 秒，演出結束 " + r2(res.endTime) + " 秒");
   console.log("標記：");
   res.markers.forEach((m) => console.log("  " + pad(r2(m.t).toFixed(2) + "s", 8) + pad("f" + m.frame, 7) + m.label));
+  printRounds(res);
   console.log("專案：" + dest + (backup ? "（原檔備份：" + backup + "）" : ""));
 
   const shots = res.shots || [];
@@ -316,5 +352,5 @@ function cmdEC(file, opt, deps) {
 
 module.exports = {
   APPLY_JSX, RESULT_TAG, findEC, parseCliJson, runEC, describeError, extractResult, makeScript,
-  assetRefs, isInside, copyAssets, frameFile, cmdEC,
+  assetRefs, isInside, sequenceProne, copyAssets, frameFile, printRounds, cmdEC,
 };
