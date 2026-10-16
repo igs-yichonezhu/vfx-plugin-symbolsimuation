@@ -143,7 +143,7 @@ test("EffectCraft：面板自動用英文，看得到的文字沒有中文，完
   deq(visibleTexts(panel).filter((t) => CJK.test(t) && KEEP.indexOf(t) < 0), []);
   // 英文標籤比較長：寬度要撐開（欄位寬度是照中文排的）
   const lbl = find(panel, (el) => el.type === "statictext" && el.text === "Overshoot");
-  assert.ok(lbl.preferredSize.width >= "Overshoot".length * 6 + 6, "label widened: " + lbl.preferredSize.width);
+  assert.ok(lbl.preferredSize.width > 56, "label widened beyond the Chinese width: " + lbl.preferredSize.width);
 });
 
 test("設定頁切換語言：重建面板、停在設定頁、記住選擇、設定不遺失", () => {

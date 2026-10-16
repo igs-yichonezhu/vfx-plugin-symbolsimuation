@@ -7,6 +7,10 @@
     var UI = S.ui = {};
     var SEC = "SlotFakeSpin", KEY_CFG = "lastConfig_v2", KEY_THUMB = "thumbs";
     var IS_MAC = (typeof $ !== "undefined" && $.os && $.os.indexOf("Mac") >= 0);
+    // EffectCraft 的 ScriptUI 版面和 AE 不同：分頁內容不會讓開分頁列、多行文字不會自動換行、
+    // 多欄 listbox 只顯示第一欄、不能換字型。以下遇到 IS_EC 的地方都是為了這些差異
+    var IS_EC = (typeof $ !== "undefined" && /EffectCraft/i.test(String($.os)));
+    var LINE_H = 16;
     var THUMB_RE = /\.(png|jpe?g)$/i;
 
     function getSetting(key) {
@@ -78,7 +82,7 @@
         // ================= 共用小工具 =================
         function persist() { setSetting(KEY_CFG, S.json.stringify(st.cfg)); }
 
-        function setStatus(msg) { status.text = msg; }
+        function setStatus(msg) { setMultiline(status, msg, 330, true); }
 
         function row(parent) {
             var g = parent.add("group");
@@ -100,16 +104,31 @@
 
         // 文字實際寬度（量不到就用字數估）
         function textWidth(ctrl, text) {
+            if (!fakeMetric) {
+                try {
+                    var sz = ctrl.graphics.measureString(text);
+                    if (sz && sz[0] > 0) { return Math.ceil(sz[0]); }
+                } catch (e) { /* ignore */ }
+            }
+            // 估算：英數平均約 6.3px（寧可寬一點）、中日韓 13px（EffectCraft 介面字型 13px）
+            var w = 0;
+            text = String(text);
+            for (var i = 0; i < text.length; i++) { w += text.charCodeAt(i) >= 0x2E80 ? 13 : 6.3; }
+            return Math.ceil(w);
+        }
+
+        // EffectCraft 0.3.1 的 measureString 不看字形，一律「字數 × 7」
+        var fakeMetric = false;
+        if (IS_EC) {
             try {
-                var sz = ctrl.graphics.measureString(text);
-                if (sz && sz[0] > 0) { return Math.ceil(sz[0]); }
-            } catch (e) { /* ignore */ }
-            return String(text).length * 7;
+                var mi = win.graphics.measureString("iiiiiiiiii"), mw = win.graphics.measureString("WWWWWWWWWW");
+                fakeMetric = !mi || !mw || mi[0] === mw[0];
+            } catch (e) { fakeMetric = true; }
         }
 
         // 版面寬度是照中文排的；其他語言文字比較長時自動撐開
         function fitWidth(ctrl, text, width, pad) {
-            ctrl.preferredSize.width = S.lang === "zh" ? width : Math.max(width, textWidth(ctrl, text) + (pad || 6));
+            ctrl.preferredSize.width = S.lang === "zh" ? width : Math.max(width, textWidth(ctrl, text) + (pad || (IS_EC ? 10 : 6)));
             return ctrl;
         }
 
@@ -117,9 +136,43 @@
             return fitWidth(parent.add("statictext", undefined, text), text, width || 56);
         }
 
+        // 依寬度斷行：先照空白斷，一個字就超過寬度（例如中文）時逐字斷
+        function wrapText(ctrl, text, width) {
+            var paras = String(text).split("\n"), out = [];
+            for (var i = 0; i < paras.length; i++) {
+                var words = paras[i].split(" "), line = "";
+                for (var j = 0; j < words.length; j++) {
+                    var cand = j === 0 ? words[j] : line + " " + words[j];
+                    if (j > 0 && line !== "" && textWidth(ctrl, cand) > width) {
+                        out.push(line);
+                        line = words[j];
+                    } else {
+                        line = cand;
+                    }
+                    while (line.length > 1 && textWidth(ctrl, line) > width) {
+                        var k = line.length - 1;
+                        while (k > 1 && textWidth(ctrl, line.substring(0, k)) > width) { k--; }
+                        out.push(line.substring(0, k));
+                        line = line.substring(k);
+                    }
+                }
+                out.push(line);
+            }
+            return out;
+        }
+
+        // 多行文字：AE 會自己換行；EffectCraft 要自己斷行，fixedHeight 以外依行數撐開高度
+        function setMultiline(ctrl, text, width, fixedHeight) {
+            if (!IS_EC) { ctrl.text = text; return; }
+            var lines = wrapText(ctrl, text, width);
+            ctrl.text = lines.join("\n");
+            if (!fixedHeight) { ctrl.preferredSize.height = lines.length * LINE_H; }
+        }
+
         function hint(parent, text) {
-            var t = parent.add("statictext", undefined, text, { multiline: true });
+            var t = parent.add("statictext", undefined, "", { multiline: true });
             t.preferredSize.width = 330;
+            setMultiline(t, text, 330);
             return t;
         }
 
@@ -421,7 +474,7 @@
             allTabs[ti].orientation = "column";
             allTabs[ti].alignChildren = ["left", "top"];
             allTabs[ti].spacing = 5;
-            allTabs[ti].margins = [8, 10, 8, 8];
+            allTabs[ti].margins = IS_EC ? [8, 34, 8, 8] : [8, 10, 8, 8];  // EffectCraft：讓開分頁列
         }
 
         // ================= 符號 =================
@@ -533,7 +586,7 @@
         dropField(ra3, "", "spin", "antCurve", S.CURVE_KEYS, S.tList(S.CURVE_LABELS), { after: regen });
         var pSug = section(tRhythm, T("期待感建議（依結果盤面自動判斷期待輪）"));
         var rs1 = row(pSug);
-        textField(rs1, T("觸發符號"), "antRule", "symbols", { chars: 9, tip: T("Scatter / Bonus 等觸發型符號，逗號分隔") });
+        textField(rs1, T("觸發符號"), "antRule", "symbols", { chars: IS_EC ? 16 : 9, tip: T("Scatter / Bonus 等觸發型符號，逗號分隔") });
         numField(rs1, "", "antRule", "count", T("顆觸發"), { min: 2, integer: true, chars: 2 });
         checkField(rs1, T("達標後續追"), "antRule", "after", { tip: T("已經觸發後，後面的輪還是期待（追第 4、5 顆）") });
         var rs2 = row(pSug);
@@ -548,15 +601,16 @@
         var btnApplyRhythm = rr8.add("button", undefined, T("套用節奏"));
         addTimeline(tRhythm);
         var info = tRhythm.add("statictext", undefined, "", { multiline: true });
-        info.preferredSize = [340, 44];
+        info.preferredSize = [340, IS_EC ? 4 * LINE_H : 44];
 
         // ================= 各輪 =================
-        var reelList = tReels.add("listbox", undefined, [], {
+        // EffectCraft 的 listbox 只顯示第一欄：改成單欄、每列自帶欄位名稱
+        var reelList = tReels.add("listbox", undefined, [], IS_EC ? { multiselect: true } : {
             multiselect: true, numberOfColumns: 8, showHeaders: true,
             columnTitles: [T("輪"), T("起轉"), T("停輪"), T("轉速"), T("減速"), T("衝過"), T("回彈"), T("繞框")],
             columnWidths: S.lang === "zh" ? [30, 40, 40, 40, 70, 36, 36, 60] : [30, 38, 38, 42, 70, 34, 44, 56]
         });
-        reelList.preferredSize = [356, 130];
+        reelList.preferredSize = IS_EC ? [430, 196] : [356, 130];
         var re1 = row(tReels);
         reelField(re1, T("起轉"), "start", T("秒"), { min: 0 });
         reelField(re1, T("停輪"), "stop", T("秒"), { min: 0.05, labelWidth: 30 });
@@ -608,17 +662,17 @@
         textField(ln1, T("百搭"), "lineSet", "wilds", { chars: 6, labelWidth: 30, tip: T("可代替任何符號，逗號分隔") });
         numField(ln1, T("最少"), "lineSet", "minCount", T("min\u0004連"), { min: 1, integer: true, chars: 2, labelWidth: 30 });
         var ln1b = row(tLines);
-        textField(ln1b, T("不算連線"), "lineSet", "exclude", { chars: 12, tip: T("這些符號不會算成連線（例如 SCATTER），逗號分隔") });
+        textField(ln1b, T("不算連線"), "lineSet", "exclude", { chars: IS_EC ? 18 : 12, tip: T("這些符號不會算成連線（例如 SCATTER），逗號分隔") });
         var ln2 = row(tLines);
         var btnDetect = ln2.add("button", undefined, T("從結果盤面偵測"));
         var btnAddLine = ln2.add("button", undefined, T("新增"));
         var btnDelLine = ln2.add("button", undefined, T("刪除"));
-        var lineList = tLines.add("listbox", undefined, [], {
+        var lineList = tLines.add("listbox", undefined, [], IS_EC ? { multiselect: true } : {
             multiselect: true, numberOfColumns: 4, showHeaders: true,
             columnTitles: ["#", T("線型"), T("count\u0004連"), T("顯示（停妥後 開始+長度）")],
             columnWidths: [26, 84, 26, 200]
         });
-        lineList.preferredSize = [356, 100];
+        lineList.preferredSize = [IS_EC ? 430 : 356, 100];
         var le1 = row(tLines);
         var etLinePattern = lineField(le1, T("線型"), "pattern", { chars: 12, tip: T("每輪第幾列（1 = 最上面），例如 1,2,3,2,1。\n0 = 這輪不框：2,0,1,0,2 = 只框 3 顆 Scatter、不畫線") });
         var etLineCount = lineField(le1, T("count\u0004連"), "count", { chars: 2, labelWidth: 20, integer: true });
@@ -697,7 +751,7 @@
         dropField(f3, T("方向"), "spin", "direction", ["down", "up"], [T("向下"), T("向上")]);
         var etSeed = numField(f3, T("亂數種子"), "spin", "seed", "", { min: 1, integer: true, chars: 6, labelWidth: 52, tip: T("決定轉動中填充符號的排列，同一個種子結果相同") });
         var btnSeed = f3.add("button", undefined, T("換"));
-        fitWidth(btnSeed, btnSeed.text, 30, 16);
+        fitWidth(btnSeed, btnSeed.text, 30, IS_EC ? 28 : 16);
         var f4 = row(pFeel);
         checkField(f4, T("動態模糊"), "spin", "motionBlur");
         numField(f4, T("快門角度"), "spin", "shutterAngle", "", { min: 0, max: 720, integer: true, labelWidth: 52 });
@@ -715,7 +769,7 @@
         var btnSave = gAct2.add("button", undefined, T("存設定…"));
         var btnOpen = gAct2.add("button", undefined, T("開設定…"));
         var status = win.add("statictext", undefined, "", { multiline: true });
-        status.preferredSize = [340, 32];
+        status.preferredSize = [340, IS_EC ? 3 * LINE_H : 32];
 
         // ================= 各輪欄位 =================
         function selectedIndices(lb) {
@@ -792,9 +846,14 @@
             reelList.removeAll();
             for (var i = 0; i < st.cfg.reels.length; i++) {
                 var R = st.cfg.reels[i];
-                var it = reelList.add("item", "R" + (i + 1));
                 var cols = [fmt2(R.start), fmt2(R.stop), fmt(R.speed), fmt2(R.decelTime) + " " + curveLabel(R.decelCurve),
                     fmt2(R.overshoot), fmt2(R.bounceTime), R.frame ? T("從 {0}{1}", fmt2(R.frameStart), R.frameSpeed > 0 ? " @" + fmt(R.frameSpeed) : "") : "-"];
+                if (IS_EC) {
+                    reelList.add("item", T("R{0}  {1} → {2} 秒   轉速 {3}   減速 {4}\n      衝過 {5}   回彈 {6}   繞框 {7}",
+                        i + 1, cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6]));
+                    continue;
+                }
+                var it = reelList.add("item", "R" + (i + 1));
                 for (var c = 0; c < cols.length; c++) {
                     try { it.subItems[c].text = cols[c]; } catch (e) { /* 單欄 listbox */ }
                 }
@@ -850,9 +909,13 @@
             lineList.removeAll();
             for (var i = 0; i < st.cfg.lines.length; i++) {
                 var ln = st.cfg.lines[i];
-                var it = lineList.add("item", String(i + 1));
                 var hl = ln.boxOnly || /(^|[\s,])[0-]([\s,]|$)/.test(ln.pattern);
                 var cols = [ln.pattern, hl ? T("框") : String(ln.count), ln.shows];
+                if (IS_EC) {
+                    lineList.add("item", T("{0}.  {1}   {2}   顯示 {3}", i + 1, cols[0], hl ? T("只框") : T("連 {0}", ln.count), cols[2]));
+                    continue;
+                }
+                var it = lineList.add("item", String(i + 1));
                 for (var c = 0; c < cols.length; c++) {
                     try { it.subItems[c].text = cols[c]; } catch (e) { /* 單欄 listbox */ }
                 }
@@ -959,7 +1022,7 @@
             st.plan = plan;
             for (var i = 0; i < st.timelines.length; i++) { redraw(st.timelines[i]); }
             if (!plan) { info.text = ""; return; }
-            if (plan.errors.length) { info.text = "⚠ " + plan.errors[0]; return; }
+            if (plan.errors.length) { setMultiline(info, "⚠ " + plan.errors[0], 340, true); return; }
             var stops = [], maxV = 0;
             for (i = 0; i < plan.reels.length; i++) {
                 stops.push("R" + (plan.reels[i].index + 1) + " " + fmt2(plan.reels[i].stopTime - plan.startTime));
@@ -967,7 +1030,7 @@
             }
             var txt = T("停輪(秒)：{0}\n全部停妥 {1} 秒、演出結束 {2} 秒（@{3}fps，最高 {4} 格/秒）", stops.join("  "), fmt2(plan.allSettled - plan.startTime), fmt2(plan.endTime - plan.startTime), fmt(plan.fps), fmt(Math.round(maxV * 10) / 10));
             if (plan.warnings.length) { txt += "\n⚠ " + plan.warnings[0]; }
-            info.text = txt;
+            setMultiline(info, txt, 340, true);
         }
 
         function syncAll() {
@@ -1223,13 +1286,15 @@
             var d = new Window("dialog", S.NAME + " - " + title);
             d.orientation = "column";
             d.alignChildren = ["fill", "top"];
-            var t1 = d.add("statictext", undefined, intro, { multiline: true });
+            var t1 = d.add("statictext", undefined, "", { multiline: true });
             t1.preferredSize.width = 420;
+            setMultiline(t1, intro, 420);
             var et = d.add("edittext", undefined, text, { multiline: true });
             et.preferredSize = [420, 160];
             if (extra) {
-                var t2 = d.add("statictext", undefined, extra, { multiline: true });
+                var t2 = d.add("statictext", undefined, "", { multiline: true });
                 t2.preferredSize = [420, 40];
+                setMultiline(t2, extra, 420);
             }
             var gb = d.add("group");
             gb.alignment = "right";

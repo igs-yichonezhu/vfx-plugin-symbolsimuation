@@ -1538,6 +1538,9 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         "\u958B\u8A2D\u5B9A\u2026": "Open Preset...",
         "\u5DF2\u624B\u52D5\u8ABF\u6574\u5404\u8F2A\uFF1B\u300C\u7BC0\u594F\u300D\u9801\u6539\u70BA\u6309\u300C\u5957\u7528\u7BC0\u594F\u300D\u624D\u6703\u8986\u84CB": "Reels edited by hand; the Rhythm tab now only overwrites them when you click \"Apply rhythm\"",
         "\u5F9E {0}{1}": "from {0}{1}",
+        "R{0}  {1} \u2192 {2} \u79D2   \u8F49\u901F {3}   \u6E1B\u901F {4}\n      \u885D\u904E {5}   \u56DE\u5F48 {6}   \u7E5E\u6846 {7}": "R{0}  {1} \u2192 {2} s   speed {3}   decel {4}\n      overshoot {5}   bounce {6}   frame {7}",
+        "{0}.  {1}   {2}   \u986F\u793A {3}": "{0}.  {1}   {2}   show {3}",
+        "\u9023 {0}": "count {0}",
         "\u6846": "Box",
         "\uFF08\u5C1A\u672A\u6307\u5B9A\uFF09": "(not set)",
         "\u7D20\u6750\uFF1A": "Asset: ",
@@ -2365,6 +2368,9 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
     var UI = S.ui = {};
     var SEC = "SlotFakeSpin", KEY_CFG = "lastConfig_v2", KEY_THUMB = "thumbs";
     var IS_MAC = (typeof $ !== "undefined" && $.os && $.os.indexOf("Mac") >= 0);
+
+    var IS_EC = (typeof $ !== "undefined" && /EffectCraft/i.test(String($.os)));
+    var LINE_H = 16;
     var THUMB_RE = /\.(png|jpe?g)$/i;
 
     function getSetting(key) {
@@ -2435,7 +2441,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
 
         function persist() { setSetting(KEY_CFG, S.json.stringify(st.cfg)); }
 
-        function setStatus(msg) { status.text = msg; }
+        function setStatus(msg) { setMultiline(status, msg, 330, true); }
 
         function row(parent) {
             var g = parent.add("group");
@@ -2456,15 +2462,29 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         }
 
         function textWidth(ctrl, text) {
+            if (!fakeMetric) {
+                try {
+                    var sz = ctrl.graphics.measureString(text);
+                    if (sz && sz[0] > 0) { return Math.ceil(sz[0]); }
+                } catch (e) {  }
+            }
+
+            var w = 0;
+            text = String(text);
+            for (var i = 0; i < text.length; i++) { w += text.charCodeAt(i) >= 0x2E80 ? 13 : 6.3; }
+            return Math.ceil(w);
+        }
+
+        var fakeMetric = false;
+        if (IS_EC) {
             try {
-                var sz = ctrl.graphics.measureString(text);
-                if (sz && sz[0] > 0) { return Math.ceil(sz[0]); }
-            } catch (e) {  }
-            return String(text).length * 7;
+                var mi = win.graphics.measureString("iiiiiiiiii"), mw = win.graphics.measureString("WWWWWWWWWW");
+                fakeMetric = !mi || !mw || mi[0] === mw[0];
+            } catch (e) { fakeMetric = true; }
         }
 
         function fitWidth(ctrl, text, width, pad) {
-            ctrl.preferredSize.width = S.lang === "zh" ? width : Math.max(width, textWidth(ctrl, text) + (pad || 6));
+            ctrl.preferredSize.width = S.lang === "zh" ? width : Math.max(width, textWidth(ctrl, text) + (pad || (IS_EC ? 10 : 6)));
             return ctrl;
         }
 
@@ -2472,9 +2492,41 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             return fitWidth(parent.add("statictext", undefined, text), text, width || 56);
         }
 
+        function wrapText(ctrl, text, width) {
+            var paras = String(text).split("\n"), out = [];
+            for (var i = 0; i < paras.length; i++) {
+                var words = paras[i].split(" "), line = "";
+                for (var j = 0; j < words.length; j++) {
+                    var cand = j === 0 ? words[j] : line + " " + words[j];
+                    if (j > 0 && line !== "" && textWidth(ctrl, cand) > width) {
+                        out.push(line);
+                        line = words[j];
+                    } else {
+                        line = cand;
+                    }
+                    while (line.length > 1 && textWidth(ctrl, line) > width) {
+                        var k = line.length - 1;
+                        while (k > 1 && textWidth(ctrl, line.substring(0, k)) > width) { k--; }
+                        out.push(line.substring(0, k));
+                        line = line.substring(k);
+                    }
+                }
+                out.push(line);
+            }
+            return out;
+        }
+
+        function setMultiline(ctrl, text, width, fixedHeight) {
+            if (!IS_EC) { ctrl.text = text; return; }
+            var lines = wrapText(ctrl, text, width);
+            ctrl.text = lines.join("\n");
+            if (!fixedHeight) { ctrl.preferredSize.height = lines.length * LINE_H; }
+        }
+
         function hint(parent, text) {
-            var t = parent.add("statictext", undefined, text, { multiline: true });
+            var t = parent.add("statictext", undefined, "", { multiline: true });
             t.preferredSize.width = 330;
+            setMultiline(t, text, 330);
             return t;
         }
 
@@ -2771,7 +2823,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             allTabs[ti].orientation = "column";
             allTabs[ti].alignChildren = ["left", "top"];
             allTabs[ti].spacing = 5;
-            allTabs[ti].margins = [8, 10, 8, 8];
+            allTabs[ti].margins = IS_EC ? [8, 34, 8, 8] : [8, 10, 8, 8];
         }
 
         var gSymBtns = row(tSym);
@@ -2880,7 +2932,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         dropField(ra3, "", "spin", "antCurve", S.CURVE_KEYS, S.tList(S.CURVE_LABELS), { after: regen });
         var pSug = section(tRhythm, T("\u671F\u5F85\u611F\u5EFA\u8B70\uFF08\u4F9D\u7D50\u679C\u76E4\u9762\u81EA\u52D5\u5224\u65B7\u671F\u5F85\u8F2A\uFF09"));
         var rs1 = row(pSug);
-        textField(rs1, T("\u89F8\u767C\u7B26\u865F"), "antRule", "symbols", { chars: 9, tip: T("Scatter / Bonus \u7B49\u89F8\u767C\u578B\u7B26\u865F\uFF0C\u9017\u865F\u5206\u9694") });
+        textField(rs1, T("\u89F8\u767C\u7B26\u865F"), "antRule", "symbols", { chars: IS_EC ? 16 : 9, tip: T("Scatter / Bonus \u7B49\u89F8\u767C\u578B\u7B26\u865F\uFF0C\u9017\u865F\u5206\u9694") });
         numField(rs1, "", "antRule", "count", T("\u9846\u89F8\u767C"), { min: 2, integer: true, chars: 2 });
         checkField(rs1, T("\u9054\u6A19\u5F8C\u7E8C\u8FFD"), "antRule", "after", { tip: T("\u5DF2\u7D93\u89F8\u767C\u5F8C\uFF0C\u5F8C\u9762\u7684\u8F2A\u9084\u662F\u671F\u5F85\uFF08\u8FFD\u7B2C 4\u30015 \u9846\uFF09") });
         var rs2 = row(pSug);
@@ -2895,14 +2947,14 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         var btnApplyRhythm = rr8.add("button", undefined, T("\u5957\u7528\u7BC0\u594F"));
         addTimeline(tRhythm);
         var info = tRhythm.add("statictext", undefined, "", { multiline: true });
-        info.preferredSize = [340, 44];
+        info.preferredSize = [340, IS_EC ? 4 * LINE_H : 44];
 
-        var reelList = tReels.add("listbox", undefined, [], {
+        var reelList = tReels.add("listbox", undefined, [], IS_EC ? { multiselect: true } : {
             multiselect: true, numberOfColumns: 8, showHeaders: true,
             columnTitles: [T("\u8F2A"), T("\u8D77\u8F49"), T("\u505C\u8F2A"), T("\u8F49\u901F"), T("\u6E1B\u901F"), T("\u885D\u904E"), T("\u56DE\u5F48"), T("\u7E5E\u6846")],
             columnWidths: S.lang === "zh" ? [30, 40, 40, 40, 70, 36, 36, 60] : [30, 38, 38, 42, 70, 34, 44, 56]
         });
-        reelList.preferredSize = [356, 130];
+        reelList.preferredSize = IS_EC ? [430, 196] : [356, 130];
         var re1 = row(tReels);
         reelField(re1, T("\u8D77\u8F49"), "start", T("\u79D2"), { min: 0 });
         reelField(re1, T("\u505C\u8F2A"), "stop", T("\u79D2"), { min: 0.05, labelWidth: 30 });
@@ -2952,17 +3004,17 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         textField(ln1, T("\u767E\u642D"), "lineSet", "wilds", { chars: 6, labelWidth: 30, tip: T("\u53EF\u4EE3\u66FF\u4EFB\u4F55\u7B26\u865F\uFF0C\u9017\u865F\u5206\u9694") });
         numField(ln1, T("\u6700\u5C11"), "lineSet", "minCount", T("min\u0004\u9023"), { min: 1, integer: true, chars: 2, labelWidth: 30 });
         var ln1b = row(tLines);
-        textField(ln1b, T("\u4E0D\u7B97\u9023\u7DDA"), "lineSet", "exclude", { chars: 12, tip: T("\u9019\u4E9B\u7B26\u865F\u4E0D\u6703\u7B97\u6210\u9023\u7DDA\uFF08\u4F8B\u5982 SCATTER\uFF09\uFF0C\u9017\u865F\u5206\u9694") });
+        textField(ln1b, T("\u4E0D\u7B97\u9023\u7DDA"), "lineSet", "exclude", { chars: IS_EC ? 18 : 12, tip: T("\u9019\u4E9B\u7B26\u865F\u4E0D\u6703\u7B97\u6210\u9023\u7DDA\uFF08\u4F8B\u5982 SCATTER\uFF09\uFF0C\u9017\u865F\u5206\u9694") });
         var ln2 = row(tLines);
         var btnDetect = ln2.add("button", undefined, T("\u5F9E\u7D50\u679C\u76E4\u9762\u5075\u6E2C"));
         var btnAddLine = ln2.add("button", undefined, T("\u65B0\u589E"));
         var btnDelLine = ln2.add("button", undefined, T("\u522A\u9664"));
-        var lineList = tLines.add("listbox", undefined, [], {
+        var lineList = tLines.add("listbox", undefined, [], IS_EC ? { multiselect: true } : {
             multiselect: true, numberOfColumns: 4, showHeaders: true,
             columnTitles: ["#", T("\u7DDA\u578B"), T("count\u0004\u9023"), T("\u986F\u793A\uFF08\u505C\u59A5\u5F8C \u958B\u59CB+\u9577\u5EA6\uFF09")],
             columnWidths: [26, 84, 26, 200]
         });
-        lineList.preferredSize = [356, 100];
+        lineList.preferredSize = [IS_EC ? 430 : 356, 100];
         var le1 = row(tLines);
         var etLinePattern = lineField(le1, T("\u7DDA\u578B"), "pattern", { chars: 12, tip: T("\u6BCF\u8F2A\u7B2C\u5E7E\u5217\uFF081 = \u6700\u4E0A\u9762\uFF09\uFF0C\u4F8B\u5982 1,2,3,2,1\u3002\n0 = \u9019\u8F2A\u4E0D\u6846\uFF1A2,0,1,0,2 = \u53EA\u6846 3 \u9846 Scatter\u3001\u4E0D\u756B\u7DDA") });
         var etLineCount = lineField(le1, T("count\u0004\u9023"), "count", { chars: 2, labelWidth: 20, integer: true });
@@ -3040,7 +3092,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         dropField(f3, T("\u65B9\u5411"), "spin", "direction", ["down", "up"], [T("\u5411\u4E0B"), T("\u5411\u4E0A")]);
         var etSeed = numField(f3, T("\u4E82\u6578\u7A2E\u5B50"), "spin", "seed", "", { min: 1, integer: true, chars: 6, labelWidth: 52, tip: T("\u6C7A\u5B9A\u8F49\u52D5\u4E2D\u586B\u5145\u7B26\u865F\u7684\u6392\u5217\uFF0C\u540C\u4E00\u500B\u7A2E\u5B50\u7D50\u679C\u76F8\u540C") });
         var btnSeed = f3.add("button", undefined, T("\u63DB"));
-        fitWidth(btnSeed, btnSeed.text, 30, 16);
+        fitWidth(btnSeed, btnSeed.text, 30, IS_EC ? 28 : 16);
         var f4 = row(pFeel);
         checkField(f4, T("\u52D5\u614B\u6A21\u7CCA"), "spin", "motionBlur");
         numField(f4, T("\u5FEB\u9580\u89D2\u5EA6"), "spin", "shutterAngle", "", { min: 0, max: 720, integer: true, labelWidth: 52 });
@@ -3057,7 +3109,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
         var btnSave = gAct2.add("button", undefined, T("\u5B58\u8A2D\u5B9A\u2026"));
         var btnOpen = gAct2.add("button", undefined, T("\u958B\u8A2D\u5B9A\u2026"));
         var status = win.add("statictext", undefined, "", { multiline: true });
-        status.preferredSize = [340, 32];
+        status.preferredSize = [340, IS_EC ? 3 * LINE_H : 32];
 
         function selectedIndices(lb) {
             var out = [], sel = lb.selection;
@@ -3132,9 +3184,14 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             reelList.removeAll();
             for (var i = 0; i < st.cfg.reels.length; i++) {
                 var R = st.cfg.reels[i];
-                var it = reelList.add("item", "R" + (i + 1));
                 var cols = [fmt2(R.start), fmt2(R.stop), fmt(R.speed), fmt2(R.decelTime) + " " + curveLabel(R.decelCurve),
                     fmt2(R.overshoot), fmt2(R.bounceTime), R.frame ? T("\u5F9E {0}{1}", fmt2(R.frameStart), R.frameSpeed > 0 ? " @" + fmt(R.frameSpeed) : "") : "-"];
+                if (IS_EC) {
+                    reelList.add("item", T("R{0}  {1} \u2192 {2} \u79D2   \u8F49\u901F {3}   \u6E1B\u901F {4}\n      \u885D\u904E {5}   \u56DE\u5F48 {6}   \u7E5E\u6846 {7}",
+                        i + 1, cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6]));
+                    continue;
+                }
+                var it = reelList.add("item", "R" + (i + 1));
                 for (var c = 0; c < cols.length; c++) {
                     try { it.subItems[c].text = cols[c]; } catch (e) {  }
                 }
@@ -3189,9 +3246,13 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             lineList.removeAll();
             for (var i = 0; i < st.cfg.lines.length; i++) {
                 var ln = st.cfg.lines[i];
-                var it = lineList.add("item", String(i + 1));
                 var hl = ln.boxOnly || /(^|[\s,])[0-]([\s,]|$)/.test(ln.pattern);
                 var cols = [ln.pattern, hl ? T("\u6846") : String(ln.count), ln.shows];
+                if (IS_EC) {
+                    lineList.add("item", T("{0}.  {1}   {2}   \u986F\u793A {3}", i + 1, cols[0], hl ? T("\u53EA\u6846") : T("\u9023 {0}", ln.count), cols[2]));
+                    continue;
+                }
+                var it = lineList.add("item", String(i + 1));
                 for (var c = 0; c < cols.length; c++) {
                     try { it.subItems[c].text = cols[c]; } catch (e) {  }
                 }
@@ -3297,7 +3358,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             st.plan = plan;
             for (var i = 0; i < st.timelines.length; i++) { redraw(st.timelines[i]); }
             if (!plan) { info.text = ""; return; }
-            if (plan.errors.length) { info.text = "\u26A0 " + plan.errors[0]; return; }
+            if (plan.errors.length) { setMultiline(info, "\u26A0 " + plan.errors[0], 340, true); return; }
             var stops = [], maxV = 0;
             for (i = 0; i < plan.reels.length; i++) {
                 stops.push("R" + (plan.reels[i].index + 1) + " " + fmt2(plan.reels[i].stopTime - plan.startTime));
@@ -3305,7 +3366,7 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             }
             var txt = T("\u505C\u8F2A(\u79D2)\uFF1A{0}\n\u5168\u90E8\u505C\u59A5 {1} \u79D2\u3001\u6F14\u51FA\u7D50\u675F {2} \u79D2\uFF08@{3}fps\uFF0C\u6700\u9AD8 {4} \u683C/\u79D2\uFF09", stops.join("  "), fmt2(plan.allSettled - plan.startTime), fmt2(plan.endTime - plan.startTime), fmt(plan.fps), fmt(Math.round(maxV * 10) / 10));
             if (plan.warnings.length) { txt += "\n\u26A0 " + plan.warnings[0]; }
-            info.text = txt;
+            setMultiline(info, txt, 340, true);
         }
 
         function syncAll() {
@@ -3558,13 +3619,15 @@ if (typeof module !== "undefined" && module.exports) { module.exports = SFS; }
             var d = new Window("dialog", S.NAME + " - " + title);
             d.orientation = "column";
             d.alignChildren = ["fill", "top"];
-            var t1 = d.add("statictext", undefined, intro, { multiline: true });
+            var t1 = d.add("statictext", undefined, "", { multiline: true });
             t1.preferredSize.width = 420;
+            setMultiline(t1, intro, 420);
             var et = d.add("edittext", undefined, text, { multiline: true });
             et.preferredSize = [420, 160];
             if (extra) {
-                var t2 = d.add("statictext", undefined, extra, { multiline: true });
+                var t2 = d.add("statictext", undefined, "", { multiline: true });
                 t2.preferredSize = [420, 40];
+                setMultiline(t2, extra, 420);
             }
             var gb = d.add("group");
             gb.alignment = "right";
