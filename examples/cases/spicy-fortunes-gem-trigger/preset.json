@@ -1,0 +1,317 @@
+{
+  "version": 2,
+  "symbols": [
+    {
+      "name": "10",
+      "path": "symbols/10.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "A",
+      "path": "symbols/A.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "BLUE",
+      "path": "symbols/BLUE.png",
+      "itemId": 0,
+      "filler": false,
+      "scale": 100
+    },
+    {
+      "name": "CHILI",
+      "path": "symbols/CHILI.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "GREEN",
+      "path": "symbols/GREEN.png",
+      "itemId": 0,
+      "filler": false,
+      "scale": 100
+    },
+    {
+      "name": "GUITAR",
+      "path": "symbols/GUITAR.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "J",
+      "path": "symbols/J.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "K",
+      "path": "symbols/K.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "PINK",
+      "path": "symbols/PINK.png",
+      "itemId": 0,
+      "filler": false,
+      "scale": 100
+    },
+    {
+      "name": "Q",
+      "path": "symbols/Q.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "TACO",
+      "path": "symbols/TACO.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    }
+  ],
+  "layout": {
+    "reels": 5,
+    "rows": 3,
+    "cellW": 200,
+    "cellH": 200,
+    "gapX": 4,
+    "gapY": 0,
+    "peek": 0,
+    "margin": 60,
+    "scaleMode": "none",
+    "symbolScale": 100,
+    "target": "active",
+    "newCompFps": 30,
+    "position": [
+      540,
+      1434
+    ]
+  },
+  "spin": {
+    "startTime": 0.5,
+    "autoRhythm": false,
+    "startOrder": "",
+    "startStagger": 0,
+    "stopOrder": "",
+    "firstStop": 1,
+    "stagger": 0.25,
+    "speeds": "18",
+    "decelTime": 0.08,
+    "decelCurve": "standard",
+    "overshoot": 0.15,
+    "bounceTime": 0.2,
+    "antReels": "4,5",
+    "antTime": 0.9,
+    "antSpeed": 0,
+    "antDecelTime": 0.55,
+    "antCurve": "soft",
+    "windupDist": 0.25,
+    "windupTime": 0.15,
+    "accelTime": 0.15,
+    "speedRamp": 0.2,
+    "direction": "down",
+    "seed": 1,
+    "motionBlur": true,
+    "shutterAngle": 180
+  },
+  "antRule": {
+    "symbols": "PINK,BLUE,GREEN",
+    "count": 3,
+    "after": true,
+    "tease": "",
+    "teaseMin": 2
+  },
+  "reels": [
+    {
+      "start": 0,
+      "stop": 1,
+      "speed": 18,
+      "decelTime": 0.08,
+      "decelCurve": "standard",
+      "overshoot": 0.15,
+      "bounceTime": 0.2,
+      "frame": false,
+      "frameStart": 0,
+      "frameSpeed": 0
+    },
+    {
+      "start": 0,
+      "stop": 1.25,
+      "speed": 18,
+      "decelTime": 0.08,
+      "decelCurve": "standard",
+      "overshoot": 0.15,
+      "bounceTime": 0.2,
+      "frame": false,
+      "frameStart": 0,
+      "frameSpeed": 0
+    },
+    {
+      "start": 0,
+      "stop": 1.5,
+      "speed": 18,
+      "decelTime": 0.08,
+      "decelCurve": "standard",
+      "overshoot": 0.15,
+      "bounceTime": 0.2,
+      "frame": false,
+      "frameStart": 0,
+      "frameSpeed": 0
+    },
+    {
+      "start": 0,
+      "stop": 2.65,
+      "speed": 18,
+      "decelTime": 0.55,
+      "decelCurve": "soft",
+      "overshoot": 0.15,
+      "bounceTime": 0.2,
+      "frame": true,
+      "frameStart": 1.5,
+      "frameSpeed": 0
+    },
+    {
+      "start": 0,
+      "stop": 4.1,
+      "speed": 18,
+      "decelTime": 0.55,
+      "decelCurve": "soft",
+      "overshoot": 0.15,
+      "bounceTime": 0.2,
+      "frame": true,
+      "frameStart": 2.65,
+      "frameSpeed": 0
+    }
+  ],
+  "frame": {
+    "source": "builtin",
+    "itemId": 0,
+    "itemName": "",
+    "path": "",
+    "color": "#FFC83C",
+    "width": 8,
+    "pad": 10,
+    "laps": 1.2,
+    "runner": 22,
+    "glow": true,
+    "fade": 0.1,
+    "hold": 0.15
+  },
+  "lines": [
+    {
+      "pattern": "2,0,1,3,2",
+      "count": 4,
+      "shows": "0.2+1.8",
+      "color": "",
+      "boxOnly": true
+    }
+  ],
+  "lineSet": {
+    "paylines": "",
+    "wilds": "CHILI",
+    "exclude": "PINK,BLUE,GREEN",
+    "minCount": 3
+  },
+  "lineGen": {
+    "delay": 0.2,
+    "mode": "all",
+    "allTime": 1.8,
+    "eachTime": 0.9,
+    "gap": 0.1
+  },
+  "lineStyle": {
+    "width": 10,
+    "drawTime": 0.25,
+    "full": true,
+    "boxes": true,
+    "boxWidth": 6,
+    "pulse": 120,
+    "glow": true,
+    "cellSource": "builtin",
+    "cellItemId": 0,
+    "cellItemName": "",
+    "cellPath": ""
+  },
+  "quick": {
+    "recipe": "trigger"
+  },
+  "mode": "reels",
+  "hs": {
+    "blank": "",
+    "rounds": "",
+    "spins": 3,
+    "startSpins": 3,
+    "speed": 12,
+    "order": "col",
+    "firstStop": 0.85,
+    "stagger": 0.22,
+    "roundGap": 1.2,
+    "antCells": 1,
+    "antFrame": true,
+    "lockPulse": 115
+  },
+  "startBoard": [
+    [
+      "TACO",
+      "Q",
+      "GUITAR"
+    ],
+    [
+      "10",
+      "K",
+      "TACO"
+    ],
+    [
+      "GUITAR",
+      "K",
+      "J"
+    ],
+    [
+      "Q",
+      "TACO",
+      "CHILI"
+    ],
+    [
+      "TACO",
+      "J",
+      "GUITAR"
+    ]
+  ],
+  "endBoard": [
+    [
+      "TACO",
+      "PINK",
+      "GUITAR"
+    ],
+    [
+      "CHILI",
+      "CHILI",
+      "CHILI"
+    ],
+    [
+      "BLUE",
+      "J",
+      "10"
+    ],
+    [
+      "K",
+      "A",
+      "GREEN"
+    ],
+    [
+      "TACO",
+      "PINK",
+      "GUITAR"
+    ]
+  ]
+}

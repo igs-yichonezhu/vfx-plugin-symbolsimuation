@@ -1,0 +1,183 @@
+{
+  "version": 2,
+  "symbols": [
+    {
+      "name": "MAJOR",
+      "path": "symbols/MAJOR.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "MAJOR_2",
+      "path": "symbols/MAJOR_2.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "MAJOR_3",
+      "path": "symbols/MAJOR_3.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "MAJOR_4",
+      "path": "symbols/MAJOR_4.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "MEGA",
+      "path": "symbols/MEGA.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    }
+  ],
+  "layout": {
+    "reels": 1,
+    "rows": 1,
+    "cellW": 560,
+    "cellH": 290,
+    "gapX": 10,
+    "gapY": 10,
+    "peek": 80,
+    "margin": 40,
+    "scaleMode": "none",
+    "symbolScale": 100,
+    "target": "active",
+    "newCompFps": 30,
+    "position": [
+      800,
+      465
+    ]
+  },
+  "spin": {
+    "startTime": 0.5,
+    "autoRhythm": true,
+    "startOrder": "",
+    "startStagger": 0,
+    "stopOrder": "",
+    "firstStop": 3.25,
+    "stagger": 0.25,
+    "speeds": "12",
+    "decelTime": 1.6,
+    "decelCurve": "soft",
+    "overshoot": 0.05,
+    "bounceTime": 0.25,
+    "antReels": "",
+    "antTime": 0.8,
+    "antSpeed": 0,
+    "antDecelTime": 0.45,
+    "antCurve": "soft",
+    "windupDist": 0.15,
+    "windupTime": 0.12,
+    "accelTime": 0.2,
+    "speedRamp": 0.2,
+    "direction": "down",
+    "seed": 41,
+    "motionBlur": true,
+    "shutterAngle": 180
+  },
+  "antRule": {
+    "symbols": "SCATTER",
+    "count": 3,
+    "after": true,
+    "tease": "",
+    "teaseMin": 2
+  },
+  "reels": [
+    {
+      "start": 0,
+      "stop": 3.25,
+      "speed": 12,
+      "decelTime": 1.6,
+      "decelCurve": "soft",
+      "overshoot": 0.05,
+      "bounceTime": 0.25,
+      "frame": false,
+      "frameStart": 0,
+      "frameSpeed": 0
+    }
+  ],
+  "frame": {
+    "source": "builtin",
+    "itemId": 0,
+    "itemName": "",
+    "path": "",
+    "color": "#FFC83C",
+    "width": 8,
+    "pad": 10,
+    "laps": 1.2,
+    "runner": 22,
+    "glow": true,
+    "fade": 0.1,
+    "hold": 0.15
+  },
+  "lines": [
+    {
+      "pattern": "1",
+      "count": 1,
+      "shows": "0.5+2.2",
+      "color": "",
+      "boxOnly": true
+    }
+  ],
+  "lineSet": {
+    "paylines": "",
+    "wilds": "WILD",
+    "exclude": "SCATTER",
+    "minCount": 3
+  },
+  "lineGen": {
+    "delay": 0.5,
+    "mode": "all_each",
+    "allTime": 1.2,
+    "eachTime": 0.9,
+    "gap": 0.1
+  },
+  "lineStyle": {
+    "width": 10,
+    "drawTime": 0.25,
+    "full": true,
+    "boxes": true,
+    "boxWidth": 8,
+    "pulse": 108,
+    "glow": true,
+    "cellSource": "builtin",
+    "cellItemId": 0,
+    "cellItemName": "",
+    "cellPath": ""
+  },
+  "quick": {
+    "recipe": "normal"
+  },
+  "mode": "reels",
+  "hs": {
+    "blank": "",
+    "rounds": "",
+    "spins": 3,
+    "startSpins": 3,
+    "speed": 12,
+    "order": "col",
+    "firstStop": 0.85,
+    "stagger": 0.22,
+    "roundGap": 1.2,
+    "antCells": 1,
+    "antFrame": true,
+    "lockPulse": 115
+  },
+  "startBoard": [
+    [
+      "MAJOR_2"
+    ]
+  ],
+  "endBoard": [
+    [
+      "MAJOR"
+    ]
+  ]
+}

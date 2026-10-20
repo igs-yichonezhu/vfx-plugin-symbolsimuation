@@ -1,0 +1,221 @@
+{
+  "version": 2,
+  "symbols": [
+    {
+      "name": "BLANK",
+      "path": "symbols/BLANK.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "C200",
+      "path": "symbols/C200.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "C400",
+      "path": "symbols/C400.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "C800",
+      "path": "symbols/C800.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "C1200",
+      "path": "symbols/C1200.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    },
+    {
+      "name": "MINI",
+      "path": "symbols/MINI.png",
+      "itemId": 0,
+      "filler": true,
+      "scale": 100
+    }
+  ],
+  "layout": {
+    "reels": 3,
+    "rows": 2,
+    "cellW": 240,
+    "cellH": 240,
+    "gapX": 33,
+    "gapY": 18,
+    "peek": 0,
+    "margin": 40,
+    "scaleMode": "fit",
+    "symbolScale": 100,
+    "target": "active",
+    "newCompFps": 30,
+    "position": [
+      848,
+      448
+    ]
+  },
+  "spin": {
+    "startTime": 0,
+    "autoRhythm": true,
+    "startOrder": "",
+    "startStagger": 0,
+    "stopOrder": "",
+    "firstStop": 1,
+    "stagger": 0.25,
+    "speeds": "18",
+    "decelTime": 0.08,
+    "decelCurve": "standard",
+    "overshoot": 0.15,
+    "bounceTime": 0.2,
+    "antReels": "",
+    "antTime": 0.8,
+    "antSpeed": 0,
+    "antDecelTime": 0.45,
+    "antCurve": "soft",
+    "windupDist": 0.25,
+    "windupTime": 0.15,
+    "accelTime": 0.15,
+    "speedRamp": 0.2,
+    "direction": "down",
+    "seed": 1,
+    "motionBlur": true,
+    "shutterAngle": 180
+  },
+  "antRule": {
+    "symbols": "SCATTER",
+    "count": 3,
+    "after": true,
+    "tease": "",
+    "teaseMin": 2
+  },
+  "reels": [
+    {
+      "start": 0,
+      "stop": 1,
+      "speed": 18,
+      "decelTime": 0.08,
+      "decelCurve": "standard",
+      "overshoot": 0.15,
+      "bounceTime": 0.2,
+      "frame": false,
+      "frameStart": 0,
+      "frameSpeed": 0
+    },
+    {
+      "start": 0,
+      "stop": 1.25,
+      "speed": 18,
+      "decelTime": 0.08,
+      "decelCurve": "standard",
+      "overshoot": 0.15,
+      "bounceTime": 0.2,
+      "frame": false,
+      "frameStart": 0,
+      "frameSpeed": 0
+    },
+    {
+      "start": 0,
+      "stop": 1.5,
+      "speed": 18,
+      "decelTime": 0.08,
+      "decelCurve": "standard",
+      "overshoot": 0.15,
+      "bounceTime": 0.2,
+      "frame": false,
+      "frameStart": 0,
+      "frameSpeed": 0
+    }
+  ],
+  "frame": {
+    "source": "builtin",
+    "itemId": 0,
+    "itemName": "",
+    "path": "",
+    "color": "#FFC83C",
+    "width": 8,
+    "pad": 10,
+    "laps": 1.2,
+    "runner": 22,
+    "glow": true,
+    "fade": 0.1,
+    "hold": 0.15
+  },
+  "lines": [],
+  "lineSet": {
+    "paylines": "",
+    "wilds": "WILD",
+    "exclude": "SCATTER",
+    "minCount": 3
+  },
+  "lineGen": {
+    "delay": 0.3,
+    "mode": "all_each",
+    "allTime": 1.2,
+    "eachTime": 0.9,
+    "gap": 0.1
+  },
+  "lineStyle": {
+    "width": 10,
+    "drawTime": 0.25,
+    "full": true,
+    "boxes": true,
+    "boxWidth": 6,
+    "pulse": 115,
+    "glow": true,
+    "cellSource": "builtin",
+    "cellItemId": 0,
+    "cellItemName": "",
+    "cellPath": ""
+  },
+  "mode": "holdspin",
+  "hs": {
+    "blank": "BLANK",
+    "rounds": "@3 - C200 - / C800 - -\n@6.7 C800 - - / - - -\n@9.25 - - - / - - -\n@12.2 - - - / - C1200 -",
+    "spins": 3,
+    "startSpins": 1,
+    "speed": 12,
+    "order": "col",
+    "firstStop": 0.85,
+    "stagger": 0.22,
+    "roundGap": 1.2,
+    "antCells": 1,
+    "antFrame": true,
+    "lockPulse": 115
+  },
+  "startBoard": [
+    [
+      "BLANK",
+      "BLANK"
+    ],
+    [
+      "BLANK",
+      "BLANK"
+    ],
+    [
+      "C200",
+      "MINI"
+    ]
+  ],
+  "endBoard": [
+    [
+      "C800",
+      "C800"
+    ],
+    [
+      "C200",
+      "C1200"
+    ],
+    [
+      "C200",
+      "MINI"
+    ]
+  ]
+}
