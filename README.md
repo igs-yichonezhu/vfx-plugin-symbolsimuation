@@ -8,6 +8,8 @@
 
 > 預覽圖由 `tools/sfs.js render` 產生：關鍵影格和 AE 用同一套 Bezier 計算，但這不是 AE 算圖。範例設定檔：[examples/freegame.json](examples/freegame.json)（3 顆 Scatter 觸發，第 4、5 輪期待）。
 
+實際做過的案例（設定檔、產生素材的腳本、步驟）在 [examples/cases/](examples/cases/)：直式遊戲 PSD 的寶石觸發、競品影片的彩金滾輪還原、6 格 Hold & Spin 重轉。
+
 ## 功能
 
 **盤面**
