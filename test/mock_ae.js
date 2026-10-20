@@ -192,6 +192,8 @@ function install(globalObj, opts) {
   // 這裡用「世代」模擬：每個節點記住祖先的世代，祖先一變動，舊包裝就失效。
   class Shape { constructor() { this.vertices = []; this.inTangents = []; this.outTangents = []; this.closed = true; } }
   const LEAF_DEFAULTS = {
+    "ADBE Brightness & Contrast 2-0001": 0, // 亮度
+    "ADBE Brightness & Contrast 2-0002": 0, // 對比
     "ADBE Vector Rect Size": [100, 100], "ADBE Vector Rect Position": [0, 0], "ADBE Vector Rect Roundness": 0,
     "ADBE Vector Shape": "shape",
     "ADBE Vector Stroke Color": [1, 1, 1, 1], "ADBE Vector Stroke Opacity": 100, "ADBE Vector Stroke Width": 2,
@@ -208,11 +210,12 @@ function install(globalObj, opts) {
     "ADBE Vector Graphic - Stroke": { name: "Stroke", children: ["ADBE Vector Stroke Color", "ADBE Vector Stroke Opacity", "ADBE Vector Stroke Width", "ADBE Vector Stroke Line Cap", "ADBE Vector Stroke Line Join"] },
     "ADBE Vector Filter - Trim": { name: "Trim Paths", children: ["ADBE Vector Trim Start", "ADBE Vector Trim End", "ADBE Vector Trim Offset"] },
     "ADBE Glo2": { name: "Glow", children: [] },
+    "ADBE Brightness & Contrast 2": { name: "Brightness & Contrast", children: ["ADBE Brightness & Contrast 2-0001", "ADBE Brightness & Contrast 2-0002"] },
     "ADBE Root Vectors Group": { name: "Contents", children: [], accepts: "vector" },
     "ADBE Effect Parade": { name: "Effects", children: [], accepts: "effect" },
   };
   const VECTOR_ITEMS = ["ADBE Vector Group", "ADBE Vector Shape - Rect", "ADBE Vector Shape - Group", "ADBE Vector Graphic - Stroke", "ADBE Vector Filter - Trim"];
-  const EFFECTS = ["ADBE Glo2"];
+  const EFFECTS = ["ADBE Glo2", "ADBE Brightness & Contrast 2"];
 
   function makeNode(mn) {
     if (GROUP_SCHEMA[mn]) {
@@ -423,6 +426,7 @@ function install(globalObj, opts) {
     }
     get position() { return this.transform.position; }
     moveToBeginning() { const L = this.containingComp._layers; L.splice(L.indexOf(this), 1); L.unshift(this); }
+    moveToEnd() { const L = this.containingComp._layers; L.splice(L.indexOf(this), 1); L.push(this); }
     remove() { const L = this.containingComp._layers; L.splice(L.indexOf(this), 1); }
   }
 
@@ -452,6 +456,14 @@ function install(globalObj, opts) {
       if (this.activeItem === it) this.activeItem = null;
     }
     get numItems() { return this._items.length; }
+    // AE：存成 .aep（模擬：寫一個小檔案並記下路徑）
+    save(file) {
+      if (!file || !file.fsName) throw new Error("save needs a File");
+      fs.mkdirSync(path.dirname(file.fsName), { recursive: true });
+      fs.writeFileSync(file.fsName, "AEP@" + this._items.length);
+      this.file = file;
+      return true;
+    }
     item(i) { return this._items[i - 1]; }
     itemByID(id) { return this._items.find((it) => it.id === id) || null; }
     get selection() { return this._items.filter((it) => it.selected); }
@@ -481,6 +493,8 @@ function install(globalObj, opts) {
   const settings = {};
   const app = {
     project: new Project(),
+    // AE：開新專案（g.__keepProject = true 模擬使用者取消「要不要存目前專案」）
+    newProject() { if (g.__keepProject) return null; this.project = new Project(); return this.project; },
     _undo: 0,
     _undoMax: 0,
     beginUndoGroup() { this._undo++; this._undoMax = Math.max(this._undoMax, this._undo); },

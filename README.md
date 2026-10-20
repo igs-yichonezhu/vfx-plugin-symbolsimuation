@@ -146,6 +146,17 @@ L1                                         111111111111111111
 - `ae` 需要 AE 已開啟專案；找不到 AE 時設定環境變數 `SFS_AE`（Windows：`AfterFX.exe` 完整路徑；macOS：App 名稱，例如 `Adobe After Effects 2025`）。
 - 也可以在 AE 用 **檔案 → 指令碼 → 執行指令碼檔案** 執行 [`dist/SlotFakeSpin_apply.jsx`](dist/SlotFakeSpin_apply.jsx)，選一個設定檔直接建立。
 
+### 交付 .aep
+
+```
+# 這台有 AE：開新專案、建主合成、放背景、建盤面、存檔
+node tools/sfs.js ae work/demo/preset.json --new-project --comp Main --main 1920x1080@7 --bg work/demo/bg.png --save-aep work/demo/demo.aep
+# 這台沒有 AE（或沒有授權）：打包給有 AE 的人執行 build_aep.jsx
+node tools/sfs.js aep-kit work/demo/preset.json --out work/demo/aep-kit --comp Main --main 1920x1080@7 --bg work/demo/bg.png --name demo --zip
+```
+
+aep-kit 是獨立資料夾（素材、設定、建置程式、`build_aep.jsx`），在 AE 用「檔案 → 指令碼 → 執行指令碼檔案」執行 `build_aep.jsx` 就會在同資料夾存出 .aep，那台電腦不用裝 SlotFakeSpin 或 Node。`--top` 放固定的框 / 指針到最上層，`--post` 在盤面建好後執行額外腳本（例如 [examples/cases](examples/cases/) 的滾筒表達式）。
+
 ### Hold & Spin 重轉
 
 ```

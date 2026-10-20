@@ -20,6 +20,8 @@
 | 預覽 | `render P --boards b.png --sheet k.png --gif a.gif [--scale 0.5] [--fps 30]` |
 | 符號總覽 | `symbols-sheet <資料夾\|P> out.png` |
 | 送進 AE | `ae P --comp "合成名稱" [--mode auto\|new\|update] [--position x,y\|center] [--frames auto] [--out 資料夾]` |
+| 從頭建專案並存 .aep（有 AE） | `ae P --new-project --comp 主合成 --main 1920x1080@7[@30] [--bg 圖] [--top 圖,圖] [--post 腳本,腳本] --save-aep 檔案.aep` |
+| 打包給有 AE 的人存 .aep | `aep-kit P --out 資料夾 --comp 主合成 --main 1920x1080@7[@30] [--bg 圖] [--top 圖,圖] [--post 腳本,腳本] [--name 檔名] [--position x,y] [--zip] [--force]` |
 | 沒有 AE：EffectCraft | `ec P --project 專案.ecproj [--comp "合成名稱"] [--mode auto\|new\|update] [--pos x,y] [--frames auto] [--render out.mp4] [--save-as 另存.ecproj] [--copy-assets] [--out 資料夾]` |
 | Hold & Spin：建立 / 轉換 | `hs-init P --blank BLANK [--grid 3x2] [--cell 240] [--gap 33x18] [--spins 3] [--start-spins 1]`；新建：`hs-init --symbols <資料夾> --out P --blank BLANK ...` |
 | Hold & Spin：盤面與回合 | `hs-board P --start "- - 200 / - - MINI" --rounds "@3 - 200 - / 800 - -; @6.7 800 - - / - - -"`、`--add <回合>`、`--clear`（見下方「Hold & Spin」） |
@@ -34,6 +36,19 @@ Hold & Spin 設定檔（`mode = holdspin`）不能用 `board` / `reel` / `regen`
 盤面位置：設定檔有 `layout.position` 時，建立和更新都會把盤面中心放到合成的這個位置（錨點設在盤面中心）；沒有就新建時放合成中央、更新時不動。`--position` 只改這一次（`center` = 不套用）。`--dry-run` 會印出這次的盤面位置，啟動腳本裡也帶著（`position`）。
 
 `ae` 會回報：建立的盤面合成、全部停妥 / 演出結束時間、標記（秒 + 影格）、以及 AE 實際算出的檢查畫面 PNG 路徑（用 Read 看）。
+
+### 交付 .aep（ae --new-project / aep-kit）
+
+| 參數 | 說明 |
+| --- | --- |
+| `--new-project` | 先開新專案（AE 會問要不要存目前的專案；取消就不建）。有 `--main` 時自動開啟 |
+| `--comp` + `--main 寬x高[@秒][@fps]` | 建主合成當目標；名稱預設 Main，長度預設 = 演出結束 + 1 秒，fps 預設 `layout.newCompFps` |
+| `--bg 圖` | 放在主合成最底層（遊戲畫面背景，和 `layout.position` 一起對齊盤面） |
+| `--top 圖,圖` | 放在主合成最上層（固定的框、指針），逗號分隔 |
+| `--post 腳本,腳本` | 盤面建好後執行（讀進來 eval；腳本裡可以用 `$.global.SFS_BUILD.board / target / layer`），例如 examples/cases 的滾筒表達式 |
+| `--save-aep 檔案.aep`（ae） / `--name 檔名`（aep-kit） | 最後存檔；aep-kit 存在 kit 資料夾裡 |
+
+aep-kit 的內容：`preset.json`（符號路徑改成 `assets/...` 相對路徑、AE 項目 ID 清空）、`assets/`（檔名結尾是數字的放各自資料夾）、`SlotFakeSpin_apply.jsx`、`build_aep.jsx`（全 ASCII；結果放在 `$.global.SFS_KIT_RESULT`，`$.global.SFS_KIT_QUIET = true` 時不跳訊息，方便一次跑好幾個）、`說明.txt`。`--zip` 另外壓成 `<資料夾>.zip`（需要 Python）。
 
 ### ec（EffectCraft）
 

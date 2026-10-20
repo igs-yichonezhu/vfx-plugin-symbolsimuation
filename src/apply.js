@@ -9,6 +9,12 @@
  * EffectCraft（tools/sfs.js ec）另外用：
  *   config: 直接帶設定內容（取代 preset；腳本只能讀專案資料夾裡的檔案）, base: 設定裡相對路徑的基準資料夾,
  *   print: true = 結果用 writeLn 輸出一行「SFS_RESULT <json>」、不寫檔、不輸出檢查畫面（只回傳 shots，由 CLI 算圖）
+ * 從頭建一個 AE 專案並存檔（sfs.js ae --new-project / aep-kit 用；檔案路徑可以是相對於 base 或設定檔資料夾）：
+ *   newProject: true = 先開新專案, mainComp: { name, width, height, duration, fps } = 建主合成當目標,
+ *   layers: [{ file, name, at: "bottom"|"top" }] = 主合成最底層 / 最上層放圖（背景、固定的框或指針）,
+ *   postScripts: [檔案] = 盤面建好後執行（例如滾筒表達式；可以用 $.global.SFS_BUILD 拿到盤面合成）,
+ *   saveAs: 檔案.aep = 最後存檔
+ * 結果另外放在 $.global.SFS_APPLY_RESULT（不用寫檔就能讀）。
  * 直接從「檔案 > 指令碼 > 執行指令碼檔案」執行時，會跳出對話框選設定檔。
  */
 var T = SFS.t;
@@ -26,6 +32,28 @@ function readText(path) {
     var t = f.read();
     f.close();
     return t;
+}
+
+// 工作參數裡的檔案路徑：絕對路徑照用，相對路徑以 base（或設定檔資料夾）為準
+function jobFile(p) {
+    if (SFS.isAbsolutePath(p)) { return new File(p); }
+    var base = job.base || (job.preset ? new File(job.preset).parent.fsName : "");
+    return new File(base ? base + "/" + p : p);
+}
+
+// 執行額外腳本：讀進來 eval（EffectCraft 沒有 $.evalFile，這樣 AE / EffectCraft 都能用）
+function runScriptFile(file) {
+    var code = readText(file.fsName);
+    eval(code);
+}
+
+function addJobLayer(comp, spec) {
+    var f = jobFile(spec.file);
+    if (!f.exists) { throw new Error(T("找不到圖檔：{0}", f.fsName)); }
+    var lyr = comp.layers.add(app.project.importFile(new ImportOptions(f)));
+    if (spec.name) { lyr.name = spec.name; }
+    if (spec.at === "top") { lyr.moveToBeginning(); } else { lyr.moveToEnd(); }
+    return lyr;
 }
 
 function writeResult() {
@@ -80,8 +108,16 @@ try {
         SFS.absolutizePaths(SFS.normalizeConfig(SFS.json.parse(readText(job.preset))), new File(job.preset).parent.fsName);
     // 啟動腳本帶的盤面位置（sfs.js ae --position 可以臨時改；null = 置中 / 更新時不動）
     if (job.hasOwnProperty("position")) { cfg.layout.position = SFS.parsePosition(job.position); }
-    var target = job.comp ? SFS.ae.findComp(job.comp) : SFS.ae.activeComp();
-    if (job.comp && !target) { throw new Error(T("找不到合成「{0}」", job.comp)); }
+    if (job.newProject && !app.newProject()) { throw new Error(T("無法開新專案（目前的專案沒有關閉）")); }
+    var target;
+    if (job.mainComp) {
+        var mc = job.mainComp;
+        target = app.project.items.addComp(String(mc.name || job.comp || "Main"), Math.round(Number(mc.width)), Math.round(Number(mc.height)), 1,
+            Number(mc.duration), Number(mc.fps) || cfg.layout.newCompFps || 30);
+    } else {
+        target = job.comp ? SFS.ae.findComp(job.comp) : SFS.ae.activeComp();
+        if (job.comp && !target) { throw new Error(T("找不到合成「{0}」", job.comp)); }
+    }
     var mode = job.mode || "auto";
     var boardLayer = null;
     if (target && mode !== "new") {
@@ -124,6 +160,21 @@ try {
             }
             result.finalBoard = res.plan.finalBoard;
         }
+        // 主合成的背景 / 最上層圖、額外腳本、存檔（sfs.js ae --new-project、aep-kit）
+        var specs = job.layers || [];
+        for (i = 0; i < specs.length; i++) { addJobLayer(res.target, specs[i]); }
+        $.global.SFS_BUILD = { board: res.boardComp, target: res.target, layer: res.boardLayer };
+        var posts = job.postScripts || [];
+        for (i = 0; i < posts.length; i++) {
+            var ps = jobFile(posts[i]);
+            if (!ps.exists) { throw new Error(T("找不到腳本：{0}", ps.fsName)); }
+            try { runScriptFile(ps); } catch (ePost) { throw new Error(T("執行 {0} 時發生錯誤：{1}", decodeURI(ps.name), ePost.toString())); }
+        }
+        if (job.saveAs) {
+            var sf = jobFile(job.saveAs);
+            app.project.save(sf);
+            result.saved = sf.fsName;
+        }
         try { res.target.openInViewer(); res.target.time = Math.min(result.allSettled, res.target.duration); } catch (e1) { /* 舊版 AE */ }
         var shots = [];
         if (job.frames === "auto") { shots = autoShots(res.plan, offset); }
@@ -139,10 +190,12 @@ try {
         }
     }
 } catch (err) {
+    result.ok = false;
     result.errors.push(err.toString() + (err.line ? T("（line {0}）", err.line) : ""));
 }
 
 writeResult();
+try { $.global.SFS_APPLY_RESULT = result; } catch (eG) { /* ignore */ }
 if (job && job.print && typeof writeLn === "function") { writeLn("SFS_RESULT " + SFS.json.stringify(result)); }
 if (interactive) {
     if (result.ok) {

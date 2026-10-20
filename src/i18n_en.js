@@ -389,6 +389,10 @@
         "選擇 SlotFakeSpin 設定檔（.json）": "Choose a SlotFakeSpin preset (.json)",
         "已取消": "Cancelled",
         "找不到合成「{0}」": "Composition \"{0}\" not found",
+        "無法開新專案（目前的專案沒有關閉）": "Couldn't start a new project (the current project was not closed)",
+        "找不到圖檔：{0}": "Image not found: {0}",
+        "找不到腳本：{0}": "Script not found: {0}",
+        "執行 {0} 時發生錯誤：{1}": "Error while running {0}: {1}",
         "在合成「{0}」裡找不到要更新的盤面圖層": "No board layer to update in composition \"{0}\"",
         "SlotFakeSpin：完成 {0}（全部停妥 {1} 秒）{2}": "SlotFakeSpin: built {0} (all settled at {1} s){2}",
         "Error: 已取消": "Error: Cancelled"

@@ -1,6 +1,6 @@
 {
   "name": "slot-fake-spin",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "description": "After Effects ScriptUI panel: slot machine fake spin (start board -> result board) builder",
   "scripts": {

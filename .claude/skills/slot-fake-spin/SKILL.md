@@ -1,6 +1,6 @@
 ---
 name: slot-fake-spin
-description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、或美術的遊戲畫面 PSD，要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線，或 Link 系列的 Hold & Spin 重轉（格子各自轉、金幣鎖住、多回合、SPINS REMAINING），或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好（沒有 AE 時用 EffectCraft 建出盤面、檢查畫面與影片）。
+description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、或美術的遊戲畫面 PSD，要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線，或 Link 系列的 Hold & Spin 重轉（格子各自轉、金幣鎖住、多回合、SPINS REMAINING），或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好、存成 .aep（沒有 AE 時用 EffectCraft 建出盤面、檢查畫面與影片，或打包成 aep-kit 交給有 AE 的人一鍵存出 .aep）。
 ---
 
 # SlotFakeSpin：老虎機假轉
@@ -112,7 +112,21 @@ node tools/sfs.js ec P --project work/<案子>/<專案>.ecproj --comp "<合成�
 - 回報的盤面合成名稱、標記、`frames/` 檢查畫面（EffectCraft 實際算圖）和影片用法同 `ae`：用 Read 看 2~3 張，影片用 SendUserFile 傳給開發人員。
 - 有 ⚠ 警告（例如畫不出連線、只留框格子）要轉告開發人員；已知差異見 [cli.md](reference/cli.md)「EffectCraft 已知限制」。最終交付仍以 AE 為準。
 
-### 8. 交付
+### 8. 交付 .aep
+開發人員要的是 AE 專案檔時：
+
+- **這台有 AE**：一次從頭建好並存檔（開新專案 → 建主合成 → 背景 / 最上層圖 → 盤面 → 額外腳本 → 存檔）：
+  ```
+  node tools/sfs.js ae P --new-project --comp "<主合成>" --main 1920x1080@<秒> [--bg 背景.png] [--top 框或指針.png,...] [--post 額外腳本.jsx] --save-aep work/<案子>/<名稱>.aep
+  ```
+- **這台沒有 AE（或沒有授權）**：打包成 aep-kit，交給有 AE 的人執行裡面的 `build_aep.jsx` 就會存出 .aep：
+  ```
+  node tools/sfs.js aep-kit P --out work/<案子>/aep-kit --comp "<主合成>" --main 1920x1080@<秒> [--bg ...] [--top ...] [--post ...] --name <名稱> --zip
+  ```
+  kit 是獨立資料夾（素材、相對路徑的設定、建置程式、全 ASCII 的 build_aep.jsx、說明.txt），對方不用裝 SlotFakeSpin 或 Node。ZIP 用 SendUserFile 傳給開發人員，並說明「在 AE：檔案 > 指令碼 > 執行指令碼檔案 > build_aep.jsx」。
+- `--main` 的尺寸和背景要跟遊戲畫面一樣大，盤面才會照 `layout.position` 對齊；長度省略時 = 演出結束 + 1 秒。
+- EffectCraft 的 `.ecproj` 不是 .aep（AE 打不開）；只有預覽用途。
+
 告訴開發人員：
 - AE 裡建好的盤面合成名稱，以及要再改時可以在 SlotFakeSpin 面板選取盤面圖層，按「讀取選取盤面」。
 - 設定檔路徑（面板可用「開設定…」打開）。

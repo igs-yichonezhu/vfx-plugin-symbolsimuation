@@ -9,4 +9,10 @@
 | [fortunedoors-jackpot-wheel](fortunedoors-jackpot-wheel/) | 1×1 彩金滾輪 | 照競品影片還原 MEGA / MAJOR 滾輪：長緩停、MEGA 停輪前擦身而過（挑亂數種子）；附六角柱滾筒原型（表達式） |
 | [fortunedoors-prosperity-holdspin](fortunedoors-prosperity-holdspin/) | 3×2 Hold & Spin | 祿盤 6 格重轉：格子各自轉、金幣鎖住、4 回合到全滿 |
 
-沒有 After Effects 時可以用 EffectCraft（`node tools/sfs.js ec`）建出來並算圖，見 [cli.md](../../.claude/skills/slot-fake-spin/reference/cli.md)。
+沒有 After Effects 時可以用 EffectCraft（`node tools/sfs.js ec`）建出來並算圖；要交 .aep 但這台沒有 AE 時，用 `aep-kit` 打包給有 AE 的人一鍵存出 .aep，例如滾筒版：
+
+```
+node tools/sfs.js aep-kit preset_drum.json --out jp_drum_kit --comp JP --main 1920x1080@7 --bg bg.png --top pointers.png --post drum_prism.jsx --name JP_drum --zip
+```
+
+指令說明見 [cli.md](../../.claude/skills/slot-fake-spin/reference/cli.md)。
