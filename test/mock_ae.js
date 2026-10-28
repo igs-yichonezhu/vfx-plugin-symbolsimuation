@@ -1,0 +1,531 @@
+/*
+ * 極簡 After Effects DOM 模擬，只實作 SlotFakeSpin 用到的部分。
+ * 目的：在 Node 裡跑完整建置流程，並用 Bezier 計算關鍵影格內插，驗證盤面正確。
+ * 盡量模仿 AE 會丟錯的行為（例如有關鍵影格時 setValue、影響值超出範圍）。
+ *
+ * opts.effectcraft = true 模擬 EffectCraft 0.3.1：app.version 帶 EffectCraft、app.run 指令（shape.newPath）、
+ * 不能 addProperty("ADBE Vector Shape - Group")、合成名稱和既有項目重複時自動改名（"X1" → "X 2"）。
+ * opts.effectcraft = "nopath"：另外讓 shape.newPath 失敗。
+ */
+"use strict";
+const fs = require("fs");
+const path = require("path");
+
+function install(globalObj, opts) {
+  opts = opts || {};
+  const g = globalObj;
+  const imageSizes = opts.imageSizes || {};
+  const ec = !!opts.effectcraft;
+
+  class Collection {
+    constructor() { this._arr = []; }
+    get length() { return this._arr.length; }
+  }
+  function indexable(coll) {
+    return new Proxy(coll, {
+      get(t, k) {
+        if (typeof k === "string" && /^\d+$/.test(k)) {
+          const v = t._arr[Number(k) - 1];
+          if (v === undefined) throw new Error("index out of range: " + k);
+          return v;
+        }
+        const v = t[k];
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    });
+  }
+
+  // ---------------- File / Folder ----------------
+  class File {
+    constructor(p) { this.fsName = path.resolve(String(p)); this.encoding = "BINARY"; this._mode = null; this._buf = ""; }
+    get name() { return encodeURI(path.basename(this.fsName)); }
+    get parent() { return new Folder(path.dirname(this.fsName)); }
+    get exists() { return fs.existsSync(this.fsName) && fs.statSync(this.fsName).isFile(); }
+    open(mode) { this._mode = mode; this._buf = mode === "r" ? fs.readFileSync(this.fsName, "utf8") : ""; return true; }
+    read() { return this._buf; }
+    write(s) { this._buf += s; return true; }
+    close() { if (this._mode === "w") fs.writeFileSync(this.fsName, this._buf); this._mode = null; return true; }
+  }
+  class Folder {
+    constructor(p) { this.fsName = path.resolve(String(p)); }
+    create() { fs.mkdirSync(this.fsName, { recursive: true }); return true; }
+    get name() { return encodeURI(path.basename(this.fsName)); }
+    get exists() { return fs.existsSync(this.fsName); }
+    getFiles() {
+      return fs.readdirSync(this.fsName).map((n) => {
+        const full = path.join(this.fsName, n);
+        return fs.statSync(full).isDirectory() ? new Folder(full) : new File(full);
+      });
+    }
+  }
+  File.saveDialog = () => g.__dialogResult || null;
+  File.openDialog = () => g.__dialogResult || null;
+  Folder.selectDialog = () => g.__dialogResult || null;
+
+  // ---------------- Properties ----------------
+  const KeyframeInterpolationType = { LINEAR: 6612, BEZIER: 6613, HOLD: 6614 };
+  class KeyframeEase {
+    constructor(speed, influence) {
+      if (typeof speed !== "number" || isNaN(speed)) throw new Error("KeyframeEase speed must be a number");
+      if (!(influence >= 0.1 && influence <= 100)) throw new Error("KeyframeEase influence out of range: " + influence);
+      this.speed = speed; this.influence = influence;
+    }
+  }
+  class MarkerValue { constructor(comment) { this.comment = comment; } }
+
+  class Property {
+    constructor(name, matchName, value, opts) {
+      this.name = name; this.matchName = matchName; this.value = value;
+      this.keys = []; this.expression = ""; this.dims = Array.isArray(value) ? value.length : 1;
+      this.spatial = !!(opts && opts.spatial); this._sep = null; this._owner = opts && opts.owner;
+      this.canSeparate = !!(opts && opts.canSeparate);
+      this.any = !!(opts && opts.any);
+    }
+    get numKeys() { return this.keys.length; }
+    get dimensionsSeparated() { return !!this._sep; }
+    set dimensionsSeparated(v) {
+      if (!this.canSeparate) throw new Error("cannot separate " + this.name);
+      if (v && !this._sep) {
+        if (this.keys.length) throw new Error("mock: separate with keys not supported");
+        this._sep = this.value.map((c, i) => new Property(["X", "Y", "Z"][i] + " Position", this.matchName + "_" + i, c));
+      }
+    }
+    setValue(v) {
+      if (this.keys.length) throw new Error("Can not set value: property " + this.name + " has keyframes");
+      if (this._sep) throw new Error("setValue on separated position");
+      this._check(v); this.value = v;
+    }
+    _check(v) {
+      if (this.any) return;
+      if (this.dims > 1 && (!Array.isArray(v) || v.length < 2)) throw new Error(this.name + " expects array");
+      if (this.dims === 1 && typeof v !== "number" && !(v instanceof MarkerValue)) throw new Error(this.name + " expects number, got " + v);
+      const arr = Array.isArray(v) ? v : [v];
+      arr.forEach((x) => { if (typeof x === "number" && !isFinite(x)) throw new Error("non-finite value"); });
+    }
+    addKey(t) {
+      if (typeof t !== "number" || !isFinite(t)) throw new Error("bad key time");
+      const existing = this.keys.findIndex((k) => Math.abs(k.t - t) < 1e-9);
+      if (existing >= 0) return existing + 1;
+      const k = { t, v: this.valueAtTime(t), inI: KeyframeInterpolationType.LINEAR, outI: KeyframeInterpolationType.LINEAR, inE: null, outE: null };
+      this.keys.push(k);
+      this.keys.sort((a, b) => a.t - b.t);
+      return this.keys.indexOf(k) + 1;
+    }
+    _key(i) { const k = this.keys[i - 1]; if (!k) throw new Error("key index out of range: " + i); return k; }
+    setValueAtKey(i, v) { this._check(v); this._key(i).v = v; }
+    setValueAtTime(t, v) { const i = this.addKey(t); this.setValueAtKey(i, v); }
+    keyTime(i) { return this._key(i).t; }
+    keyValue(i) { return this._key(i).v; }
+    removeKey(i) { this._key(i); this.keys.splice(i - 1, 1); }
+    setInterpolationTypeAtKey(i, inT, outT) { const k = this._key(i); k.inI = inT; k.outI = outT === undefined ? inT : outT; }
+    setTemporalAutoBezierAtKey(i) { this._key(i); }
+    setTemporalContinuousAtKey(i) { this._key(i); }
+    setTemporalEaseAtKey(i, inE, outE) {
+      const k = this._key(i);
+      const n = this.spatial ? 1 : this.dims;
+      if (!Array.isArray(inE) || inE.length !== n || !Array.isArray(outE) || outE.length !== n) {
+        throw new Error("setTemporalEaseAtKey: ease arrays must have " + n + " element(s)");
+      }
+      [...inE, ...outE].forEach((e) => { if (!(e instanceof KeyframeEase)) throw new Error("not a KeyframeEase"); });
+      k.inE = inE; k.outE = outE;
+      k.inI = KeyframeInterpolationType.BEZIER; k.outI = KeyframeInterpolationType.BEZIER;
+    }
+    valueAtTime(t) {
+      const K = this.keys;
+      if (!K.length) return this.value;
+      if (t <= K[0].t) return K[0].v;
+      if (t >= K[K.length - 1].t) return K[K.length - 1].v;
+      const exact = K.find((k) => Math.abs(k.t - t) < 1e-9);
+      if (exact) return exact.v;
+      let j = 0;
+      while (K[j + 1].t < t) j++;
+      const a = K[j], b = K[j + 1];
+      const dt = b.t - a.t;
+      if (Array.isArray(a.v)) return a.v.map((x, i) => x + (b.v[i] - x) * (t - a.t) / dt);
+      if (typeof a.v !== "number") return a.v;
+      if (a.outI === KeyframeInterpolationType.HOLD) return a.v;
+      if (a.outI !== KeyframeInterpolationType.BEZIER || b.inI !== KeyframeInterpolationType.BEZIER || !a.outE || !b.inE) {
+        return a.v + (b.v - a.v) * (t - a.t) / dt;
+      }
+      // AE 時間曲線：控制點 = 影響值 × 區段時間，斜率 = 速度
+      let i1 = a.outE[0].influence / 100, i2 = b.inE[0].influence / 100;
+      if (i1 + i2 > 1) { const s = i1 + i2; i1 /= s; i2 /= s; }
+      const x0 = a.t, x1 = a.t + i1 * dt, x2 = b.t - i2 * dt, x3 = b.t;
+      const y0 = a.v, y1 = a.v + a.outE[0].speed * i1 * dt, y2 = b.v - b.inE[0].speed * i2 * dt, y3 = b.v;
+      const bez = (p0, p1, p2, p3, u) => {
+        const m = 1 - u;
+        return m * m * m * p0 + 3 * m * m * u * p1 + 3 * m * u * u * p2 + u * u * u * p3;
+      };
+      let lo = 0, hi = 1;
+      for (let n = 0; n < 60; n++) {
+        const mid = (lo + hi) / 2;
+        if (bez(x0, x1, x2, x3, mid) < t) lo = mid; else hi = mid;
+      }
+      return bez(y0, y1, y2, y3, (lo + hi) / 2);
+    }
+  }
+
+  class TransformGroup {
+    constructor(layer, comp) {
+      const cx = comp.width / 2, cy = comp.height / 2;
+      const src = layer.source;
+      const aw = src ? src.width / 2 : 0, ah = src ? src.height / 2 : 0;
+      this.anchorPoint = new Property("Anchor Point", "ADBE Anchor Point", [aw, ah]);
+      this.position = new Property("Position", "ADBE Position", [cx, cy], { spatial: true, canSeparate: true });
+      this.scale = new Property("Scale", "ADBE Scale", [100, 100]);
+      this.rotation = new Property("Rotation", "ADBE Rotate Z", 0);
+      this.opacity = new Property("Opacity", "ADBE Opacity", 100);
+    }
+    property(mn) {
+      const pos = this.position;
+      if (mn === "ADBE Position_0" || mn === "X Position") { if (!pos._sep) throw new Error("not separated"); return pos._sep[0]; }
+      if (mn === "ADBE Position_1" || mn === "Y Position") { if (!pos._sep) throw new Error("not separated"); return pos._sep[1]; }
+      for (const k of ["anchorPoint", "position", "scale", "rotation", "opacity"]) {
+        if (this[k].matchName === mn || this[k].name === mn) return this[k];
+      }
+      return null;
+    }
+  }
+
+  // ---------------- Property groups (shape contents / effects) ----------------
+  // AE 的行為：群組 addProperty 之後，該群組底下先前取得的屬性參照全部失效（Object is invalid）。
+  // 這裡用「世代」模擬：每個節點記住祖先的世代，祖先一變動，舊包裝就失效。
+  class Shape { constructor() { this.vertices = []; this.inTangents = []; this.outTangents = []; this.closed = true; } }
+  const LEAF_DEFAULTS = {
+    "ADBE Brightness & Contrast 2-0001": 0, // 亮度
+    "ADBE Brightness & Contrast 2-0002": 0, // 對比
+    "ADBE Vector Rect Size": [100, 100], "ADBE Vector Rect Position": [0, 0], "ADBE Vector Rect Roundness": 0,
+    "ADBE Vector Shape": "shape",
+    "ADBE Vector Stroke Color": [1, 1, 1, 1], "ADBE Vector Stroke Opacity": 100, "ADBE Vector Stroke Width": 2,
+    "ADBE Vector Stroke Line Cap": 1, "ADBE Vector Stroke Line Join": 1,
+    "ADBE Vector Trim Start": 0, "ADBE Vector Trim End": 100, "ADBE Vector Trim Offset": 0,
+    "ADBE Vector Position": [0, 0], "ADBE Vector Scale": [100, 100], "ADBE Vector Group Opacity": 100,
+  };
+  const GROUP_SCHEMA = {
+    "ADBE Vector Group": { name: "Group", children: ["ADBE Vectors Group", "ADBE Vector Transform Group"] },
+    "ADBE Vectors Group": { name: "Contents", children: [], accepts: "vector" },
+    "ADBE Vector Transform Group": { name: "Transform", children: ["ADBE Vector Position", "ADBE Vector Scale", "ADBE Vector Group Opacity"] },
+    "ADBE Vector Shape - Rect": { name: "Rectangle Path", children: ["ADBE Vector Rect Size", "ADBE Vector Rect Position", "ADBE Vector Rect Roundness"] },
+    "ADBE Vector Shape - Group": { name: "Path", children: ["ADBE Vector Shape"] },
+    "ADBE Vector Graphic - Stroke": { name: "Stroke", children: ["ADBE Vector Stroke Color", "ADBE Vector Stroke Opacity", "ADBE Vector Stroke Width", "ADBE Vector Stroke Line Cap", "ADBE Vector Stroke Line Join"] },
+    "ADBE Vector Filter - Trim": { name: "Trim Paths", children: ["ADBE Vector Trim Start", "ADBE Vector Trim End", "ADBE Vector Trim Offset"] },
+    "ADBE Glo2": { name: "Glow", children: [] },
+    "ADBE Brightness & Contrast 2": { name: "Brightness & Contrast", children: ["ADBE Brightness & Contrast 2-0001", "ADBE Brightness & Contrast 2-0002"] },
+    "ADBE Root Vectors Group": { name: "Contents", children: [], accepts: "vector" },
+    "ADBE Effect Parade": { name: "Effects", children: [], accepts: "effect" },
+  };
+  const VECTOR_ITEMS = ["ADBE Vector Group", "ADBE Vector Shape - Rect", "ADBE Vector Shape - Group", "ADBE Vector Graphic - Stroke", "ADBE Vector Filter - Trim"];
+  const EFFECTS = ["ADBE Glo2", "ADBE Brightness & Contrast 2"];
+
+  function makeNode(mn) {
+    if (GROUP_SCHEMA[mn]) {
+      const sc = GROUP_SCHEMA[mn];
+      const node = { group: true, matchName: mn, name: sc.name, accepts: sc.accepts, gen: 0, children: [] };
+      sc.children.forEach((c) => { const ch = makeNode(c); ch.parent = node; node.children.push(ch); });
+      return node;
+    }
+    if (!(mn in LEAF_DEFAULTS)) throw new Error("mock: unknown matchName " + mn);
+    const d = LEAF_DEFAULTS[mn];
+    return { group: false, matchName: mn, prop: new Property(mn, mn, d === "shape" ? new Shape() : JSON.parse(JSON.stringify(d)), { any: d === "shape" }) };
+  }
+
+  function wrap(node) {
+    const stamps = [];
+    for (let p = node.parent; p; p = p.parent) stamps.push([p, p.gen]);
+    const check = () => {
+      stamps.forEach(([p, g]) => { if (p.gen !== g) throw new Error("Object is invalid (" + node.matchName + ")"); });
+    };
+    if (!node.group) {
+      return new Proxy(node.prop, {
+        get(t, k) { check(); const v = t[k]; return typeof v === "function" ? v.bind(t) : v; },
+        set(t, k, v) { check(); t[k] = v; return true; },
+      });
+    }
+    return {
+      get name() { check(); return node.name; },
+      set name(v) { check(); node.name = String(v); },
+      get matchName() { return node.matchName; },
+      get numProperties() { check(); return node.children.length; },
+      property(k) {
+        check();
+        let ch;
+        if (typeof k === "number") ch = node.children[k - 1];
+        else ch = node.children.find((c) => c.matchName === k) || node.children.find((c) => (c.group ? c.name : c.prop.name) === k);
+        return ch ? wrap(ch) : null;
+      },
+      addProperty(mn) {
+        check();
+        const ok = node.accepts === "vector" ? VECTOR_ITEMS : node.accepts === "effect" ? EFFECTS : [];
+        if (ok.indexOf(mn) < 0) throw new Error("mock: cannot add " + mn + " to " + node.matchName);
+        if (ec && mn === "ADBE Vector Shape - Group") throw new Error("invalid parameters for layer.addShapeItem: unknown kind path");
+        const ch = makeNode(mn);
+        ch.parent = node;
+        node.gen++;
+        node.children.push(ch);
+        return wrap(ch);
+      },
+      remove() {
+        check();
+        const p = node.parent;
+        p.children.splice(p.children.indexOf(node), 1);
+        p.gen++;
+      },
+      _node: node,
+    };
+  }
+
+  // EffectCraft 的 shape.newPath：在圖層內容最上面加一個群組（路徑 + 筆畫）
+  let shapeCount = 0;
+  function ecNewPath(params) {
+    if (opts.effectcraft === "nopath") throw new Error("unknown command shape.newPath");
+    const comp = g.app.project._items.find((it) => it.id === params.comp);
+    const layer = comp && comp._layers.find((l) => l.id === params.layer);
+    if (!layer || !layer._contents) throw new Error("shape.newPath: no shape layer " + params.comp + "/" + params.layer);
+    if (!Array.isArray(params.vertices) || params.vertices.length < 2 || params.vertices.some((v) => !Array.isArray(v) || v.length !== 2)) {
+      throw new Error("shape.newPath: bad vertices");
+    }
+    const grp = makeNode("ADBE Vector Group");
+    grp.name = "Shape " + (++shapeCount);
+    const contents = grp.children[0];
+    const pathNode = makeNode("ADBE Vector Shape - Group");
+    const sh = new Shape();
+    sh.vertices = params.vertices.map((v) => v.slice());
+    sh.closed = !!params.closed;
+    pathNode.children[0].prop.value = sh;
+    [pathNode, makeNode("ADBE Vector Graphic - Stroke")].forEach((ch) => { ch.parent = contents; contents.children.push(ch); });
+    const root = layer._contents;
+    grp.parent = root;
+    root.children.unshift(grp);
+    root.gen++;
+    (g.app.__runs = g.app.__runs || []).push({ id: "shape.newPath", params });
+    return { group: 1, layer: layer.id, path: 2 };
+  }
+
+  // ---------------- Items ----------------
+  let nextId = 1;
+  class Item {
+    constructor(project, name) {
+      this.id = nextId++; this._name = name; this.comment = ""; this._project = project;
+      this.parentFolder = project.rootFolder || null; this.label = 0; this.selected = false;
+    }
+    get name() { return this._name; }
+    set name(v) { this._name = String(v); }
+    remove() {
+      if (this.usedIn && this.usedIn.length) throw new Error("mock: removing item still in use: " + this.name);
+      this._project._remove(this);
+    }
+    get usedIn() {
+      return this._project._items.filter((it) => it instanceof CompItem && it._layers.some((l) => l.source === this));
+    }
+  }
+  class FolderItem extends Item {}
+  class AVItem extends Item {
+    constructor(project, name, w, h, dur, fps) {
+      super(project, name); this.width = w; this.height = h; this.pixelAspect = 1; this.duration = dur; this.frameRate = fps;
+    }
+  }
+  class FootageItem extends AVItem {
+    constructor(project, name, w, h, file, opts) {
+      super(project, name, w, h, 0, 0);
+      this.mainSource = file ? { file } : { color: [0, 0, 0] };
+      this.isSolid = !!(opts && opts.solid);
+    }
+  }
+  class CompItem extends AVItem {
+    constructor(project, name, w, h, par, dur, fps) {
+      [w, h].forEach((d) => { if (!Number.isInteger(d) || d < 4 || d > 30000) throw new Error("bad comp size: " + d); });
+      if (!(dur > 0 && dur <= 10800)) throw new Error("bad comp duration: " + dur);
+      if (!(fps > 0)) throw new Error("bad fps");
+      super(project, name, w, h, dur, fps);
+      this.pixelAspect = par; this._layers = []; this.motionBlur = false; this.shutterAngle = 180; this.shutterPhase = -90;
+      this.hideShyLayers = false; this.time = 0; this.openedInViewer = false;
+      const self = this;
+      this.layers = {
+        add(item) { return self._addLayer(new Layer(self, item)); },
+        addNull(duration) {
+          const solid = new FootageItem(project, "Null " + (project._items.length + 1), 100, 100, null, { solid: true });
+          project._add(solid);
+          const l = new Layer(self, solid); l.nullLayer = true; l.name = "Null " + (self._layers.length + 1);
+          if (duration !== undefined) l.outPoint = duration;
+          return self._addLayer(l);
+        },
+        addShape() {
+          const l = new Layer(self, null);
+          l.name = "Shape Layer " + (self._layers.length + 1);
+          l._outPoint = self.duration;
+          l._contents = makeNode("ADBE Root Vectors Group");
+          return self._addLayer(l);
+        },
+        get length() { return self._layers.length; },
+      };
+    }
+    set width(v) { if (this._layers && (!Number.isInteger(v) || v < 4)) throw new Error("bad width " + v); this._w = v; }
+    get width() { return this._w; }
+    set height(v) { if (this._layers && (!Number.isInteger(v) || v < 4)) throw new Error("bad height " + v); this._h = v; }
+    get height() { return this._h; }
+    _addLayer(l) { this._layers.unshift(l); return l; }
+    get numLayers() { return this._layers.length; }
+    layer(i) { const l = this._layers[i - 1]; if (!l) throw new Error("layer index out of range " + i); return l; }
+    get selectedLayers() { return this._layers.filter((l) => l.selected); }
+    openInViewer() { this.openedInViewer = true; }
+    saveFrameToPng(t, file) {
+      if (typeof t !== "number" || !isFinite(t)) throw new Error("saveFrameToPng: bad time");
+      fs.mkdirSync(path.dirname(file.fsName), { recursive: true });
+      fs.writeFileSync(file.fsName, "PNG@" + t);
+    }
+  }
+
+  let nextLayerId = 1;
+  class Layer {
+    constructor(comp, source) {
+      this.id = nextLayerId++;
+      this.containingComp = comp; this.source = source; this._name = source ? source.name : "Layer";
+      this.parent = null; this.comment = ""; this.label = 0; this.shy = false; this.motionBlur = false;
+      this.nullLayer = false; this.selected = false; this.startTime = 0; this.inPoint = 0;
+      this._timeRemap = false;
+      const srcDur = source instanceof CompItem ? source.duration : null;
+      this._outPoint = srcDur === null ? Math.min(comp.duration, 5) : Math.min(srcDur, comp.duration);
+      this.transform = new TransformGroup(this, comp);
+      this._marker = new Property("Marker", "ADBE Marker", new MarkerValue(""));
+      this._remap = null;
+      this._effects = makeNode("ADBE Effect Parade");
+      this._contents = null;
+    }
+    get name() { return this._name; }
+    set name(v) { this._name = String(v); }
+    get index() { return this.containingComp._layers.indexOf(this) + 1; }
+    get outPoint() { return this._outPoint; }
+    set outPoint(v) {
+      if (this.source instanceof CompItem && !this._timeRemap && v > this.startTime + this.source.duration + 1e-9) {
+        throw new Error("mock: cannot extend comp layer beyond source without time remap");
+      }
+      this._outPoint = v;
+    }
+    get timeRemapEnabled() { return this._timeRemap; }
+    set timeRemapEnabled(v) {
+      this._timeRemap = !!v;
+      if (v && !this._remap) {
+        this._remap = new Property("Time Remap", "ADBE Time Remapping", 0);
+        this._remap.setValueAtTime(0, 0);
+        this._remap.setValueAtTime(this.source.duration, this.source.duration);
+      }
+    }
+    property(mn) {
+      if (mn === "ADBE Marker" || mn === "Marker") return this._marker;
+      if (mn === "ADBE Time Remapping" || mn === "Time Remap") {
+        if (!this._timeRemap) throw new Error("time remap not enabled");
+        return this._remap;
+      }
+      if (mn === "ADBE Transform Group" || mn === "Transform") return this.transform;
+      if (mn === "ADBE Effect Parade" || mn === "Effects") return wrap(this._effects);
+      if (mn === "ADBE Root Vectors Group" || mn === "Contents") {
+        if (!this._contents) throw new Error("not a shape layer");
+        return wrap(this._contents);
+      }
+      return null;
+    }
+    get position() { return this.transform.position; }
+    moveToBeginning() { const L = this.containingComp._layers; L.splice(L.indexOf(this), 1); L.unshift(this); }
+    moveToEnd() { const L = this.containingComp._layers; L.splice(L.indexOf(this), 1); L.push(this); }
+    remove() { const L = this.containingComp._layers; L.splice(L.indexOf(this), 1); }
+  }
+
+  class Project {
+    constructor() {
+      this._items = [];
+      this.rootFolder = null;
+      this.rootFolder = new FolderItem(this, "Root");
+      this.activeItem = null;
+      const self = this;
+      const coll = new Collection();
+      coll.addComp = (name, w, h, par, dur, fps) => self._add(new CompItem(self, ec ? self._ecName(name) : name, w, h, par, dur, fps));
+      coll.addFolder = (name) => self._add(new FolderItem(self, name));
+      Object.defineProperty(coll, "_arr", { get: () => self._items });
+      this.items = indexable(coll);
+    }
+    _add(it) { this._items.push(it); return it; }
+    // EffectCraft：合成名稱和任何既有項目重複時改名，結尾數字換成「空格 + 2、3…」（"SFS_Board_01" → "SFS_Board_ 2"）
+    _ecName(name) {
+      const taken = (n) => this._items.some((it) => it.name === n);
+      if (!taken(name)) return name;
+      const base = name.replace(/\d+$/, "");
+      for (let n = 2; ; n++) if (!taken(base + " " + n)) return base + " " + n;
+    }
+    _remove(it) {
+      const i = this._items.indexOf(it); if (i >= 0) this._items.splice(i, 1);
+      if (this.activeItem === it) this.activeItem = null;
+    }
+    get numItems() { return this._items.length; }
+    // AE：存成 .aep（模擬：寫一個小檔案並記下路徑）
+    save(file) {
+      if (!file || !file.fsName) throw new Error("save needs a File");
+      fs.mkdirSync(path.dirname(file.fsName), { recursive: true });
+      fs.writeFileSync(file.fsName, "AEP@" + this._items.length);
+      this.file = file;
+      return true;
+    }
+    item(i) { return this._items[i - 1]; }
+    itemByID(id) { return this._items.find((it) => it.id === id) || null; }
+    get selection() { return this._items.filter((it) => it.selected); }
+    importFile(io) {
+      const f = io.file;
+      if (!f.exists) throw new Error("file missing " + f.fsName);
+      const size = imageSizes[path.basename(f.fsName)] || [256, 256];
+      const item = this._add(new FootageItem(this, path.basename(f.fsName), size[0], size[1], f));
+      item.mainSource.isStill = true;
+      // EffectCraft 0.3.1 不理會 io.sequence = false：檔名結尾是數字、同資料夾有同名系列的圖檔會變成連續圖檔（從編號最小的那張開始）
+      const ext = path.extname(f.fsName), m = /^(.*?)\d+$/.exec(path.basename(f.fsName, ext));
+      if (ec && m) {
+        const re = new RegExp("^" + m[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(\\d+)" + ext.replace(".", "\\.") + "$", "i");
+        const seq = fs.readdirSync(path.dirname(f.fsName)).filter((n) => re.test(n)).sort((a, b) => Number(re.exec(a)[1]) - Number(re.exec(b)[1]));
+        if (seq.length > 1) item.mainSource = { file: new File(path.join(path.dirname(f.fsName), seq[0])), isStill: false };
+      }
+      return item;
+    }
+  }
+
+  const ImportAsType = { FOOTAGE: 1, COMP: 2, COMP_CROPPED_LAYERS: 3, PROJECT: 4 };
+  class ImportOptions {
+    constructor(file) { this.file = file; this.importAs = ImportAsType.FOOTAGE; this.sequence = false; }
+    canImportAs(t) { return t === ImportAsType.FOOTAGE && /\.(png|jpe?g|psd|tga|tiff?|gif|bmp|ai|eps|exr|dpx|webp)$/i.test(this.file.fsName); }
+  }
+
+  const settings = {};
+  const app = {
+    project: new Project(),
+    // AE：開新專案（g.__keepProject = true 模擬使用者取消「要不要存目前專案」）
+    newProject() { if (g.__keepProject) return null; this.project = new Project(); return this.project; },
+    _undo: 0,
+    _undoMax: 0,
+    beginUndoGroup() { this._undo++; this._undoMax = Math.max(this._undoMax, this._undo); },
+    endUndoGroup() { if (this._undo <= 0) throw new Error("endUndoGroup without begin"); this._undo--; },
+    settings: {
+      haveSetting: (s, k) => Object.prototype.hasOwnProperty.call(settings, s + "/" + k),
+      getSetting: (s, k) => settings[s + "/" + k],
+      saveSetting: (s, k, v) => { if (typeof v !== "string") throw new Error("setting must be string"); settings[s + "/" + k] = v; },
+    },
+    preferences: { getPrefAsLong: () => 1 },
+  };
+  if (ec) {
+    app.version = "26.0 (EffectCraft 0.3.1)";
+    app.run = (id, params) => {
+      if (id === "shape.newPath") return ecNewPath(params || {});
+      throw new Error("unknown command " + id);
+    };
+  } else {
+    app.version = "25.0x1";
+  }
+
+  Object.assign(g, {
+    app, File, Folder, CompItem, FootageItem, FolderItem, AVItem, Layer, Property, Shape,
+    KeyframeEase, KeyframeInterpolationType, MarkerValue, ImportOptions, ImportAsType,
+    alert: (m) => { (g.__alerts = g.__alerts || []).push(String(m)); },
+    writeLn: (m) => { (g.__output = g.__output || []).push(String(m)); },
+    confirm: () => (g.__confirm === undefined ? true : g.__confirm),
+    prompt: (m, d) => (g.__prompt === undefined ? d : g.__prompt),
+    $: { os: "Windows 10" },
+  });
+  return app;
+}
+
+module.exports = { install };
