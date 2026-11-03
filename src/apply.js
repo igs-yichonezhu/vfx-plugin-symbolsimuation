@@ -153,7 +153,7 @@ try {
                 var rd = res.plan.rounds[i], locks = [];
                 for (var j = 0; j < rd.locks.length; j++) {
                     var lc = res.plan.cells[rd.locks[j]];
-                    locks.push({ cell: lc.tag, symbol: lc.final });
+                    locks.push({ cell: lc.tag, symbol: lc.finalSym });
                 }
                 result.rounds.push({ round: i + 1, start: rd.start + offset, settle: rd.settle + offset, cells: rd.cells.length,
                     locks: locks, spinsLeft: rd.spinsLeft, spinsAfter: rd.spinsAfter, end: rd.end });

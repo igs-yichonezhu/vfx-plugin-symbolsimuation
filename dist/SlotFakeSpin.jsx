@@ -1795,7 +1795,7 @@ var SFS = SFS || {};
                 y = yEnd;
             }
             plan.cells.push({ index: cl.index, row: cl.row, col: cl.col, tag: cl.tag, x: cl.x, y: cl.y, start: cl.start,
-                final: plan.finalBoard[cl.col][cl.row], strip: strip.items, startIndex: strip.startIndex, startY: startY,
+                finalSym: plan.finalBoard[cl.col][cl.row], strip: strip.items, startIndex: strip.startIndex, startY: startY,
                 keys: keys, spins: spins, lockRound: cl.lockRound, lockTime: cl.lockTime });
         }
 

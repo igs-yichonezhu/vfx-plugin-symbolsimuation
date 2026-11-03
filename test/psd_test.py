@@ -153,7 +153,13 @@ def make_psd(path):
     doc = PSDImage.new("RGBA", (600, 480), color=(90, 20, 20, 255))
 
     def add(parent, im, name, left=0, top=0):
-        layer = parent.create_pixel_layer(im, left=left, top=top)
+        if hasattr(parent, "create_pixel_layer"):
+            layer = parent.create_pixel_layer(im, left=left, top=top)
+        else:  # psd-tools 1.19 起群組沒有 create_pixel_layer
+            from psd_tools.api.layers import PixelLayer
+            layer = PixelLayer.frompil(im, parent, left=left, top=top)
+            if layer not in list(parent):
+                parent.append(layer)
         layer.name = name  # 用屬性設定才會寫入 Unicode 圖層名稱（和 Photoshop 一樣）
         return layer
 

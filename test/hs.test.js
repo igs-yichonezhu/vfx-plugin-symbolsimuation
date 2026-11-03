@@ -155,7 +155,7 @@ test("轉動計畫：每回合停妥時畫面上的符號正確、回合之間�
   assert.strictEqual(byTag["1-2"].spins.length, 1, "1-2 locked in round 1, never spins again");
   // 最後盤面
   deq(plan.board, [["K", "A"], ["BELL", "Q"], ["SEVEN", "BAR"]]);
-  deq(plan.cells.map((c) => c.final), ["K", "BELL", "SEVEN", "A", "Q", "BAR"]);
+  deq(plan.cells.map((c) => c.finalSym), ["K", "BELL", "SEVEN", "A", "Q", "BAR"]);
   // 等速段的實際速度接近 hs.speed（等比例微調）
   const c22 = byTag["2-2"];
   c22.spins.forEach((sp) => near(sp.speed / plan.pitch, cfg.hs.speed, cfg.hs.speed * 0.15));
@@ -272,7 +272,7 @@ test("AE 建立：格子合成、位置、標記、每回合停妥時的符號�
       const next = cpl.spins[k + 1];
       assert.strictEqual(visibleInCell(l.source, next ? next.start : 19.9), sp.result, cpl.tag + " holds");
     });
-    assert.strictEqual(visibleInCell(l.source, 19.9), cpl.final);
+    assert.strictEqual(visibleInCell(l.source, 19.9), cpl.finalSym);
   });
   // 鎖住的格子：鎖住後 STRIP_CTRL 不再有關鍵影格
   const y11 = cells[0].source._layers.find((l) => l.name === "STRIP_CTRL").transform.property("ADBE Position_1");

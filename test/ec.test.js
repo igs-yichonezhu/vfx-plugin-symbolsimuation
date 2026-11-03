@@ -22,6 +22,12 @@ test("build：src/ 不能用 substr（EffectCraft 沒有 String.prototype.substr
   fs.readdirSync(path.join(ROOT, "src")).forEach((f) => checkForbidden(fs.readFileSync(path.join(ROOT, "src", f), "utf8"), f));
 });
 
+test("build：ES3 保留字不能當屬性名稱（AE 會報 Illegal use of reserved word）", () => {
+  assert.throws(() => checkForbidden("var o = { a: 1,\n  final: 2 };", "src/x.js"), /src\/x\.js:2 .*final.*保留字/);
+  assert.throws(() => checkForbidden("var b = o.class;", "src/x.js"), /class/);
+  checkForbidden("var o = { finalSym: 1 }; var f = o.finalBoard; var t = a ? b : c; // o.final", "src/x.js");
+});
+
 // ---------------- 模擬 EffectCraft 建置 ----------------
 function ecSetup(flavor, overrides) {
   const ctx = newContext({ effectcraft: flavor === undefined ? true : flavor });
