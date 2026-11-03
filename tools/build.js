@@ -29,13 +29,22 @@ const FORBIDDEN_MEMBERS = {
   substr: "EffectCraft 沒有 String.prototype.substr，請改用 substring 或 slice",
 };
 
-// 找出 x.substr / x["substr"] 這類用法（註解、一般字串裡的字不算）
+// ES3 保留給未來的字：acorn 允許當屬性名稱，但 AE 的 ExtendScript 會報「Illegal use of reserved word」
+const ES3_FUTURE_RESERVED = ("abstract boolean byte char class const debugger double enum export extends final float goto " +
+  "implements import int interface long native package private protected public short static super synchronized throws transient volatile").split(" ");
+
+// 找出 x.substr / x["substr"] 這類用法、以及 x.final / { final: 1 } 這類保留字屬性（註解、一般字串裡的字不算）
 function checkForbidden(code, file) {
   const toks = [];
   for (const t of acorn.tokenizer(code, { ecmaVersion: 3, locations: true })) toks.push(t);
   const errors = [];
   for (let i = 1; i < toks.length; i++) {
     const t = toks[i], prev = toks[i - 1].type.label;
+    const prop = t.type.label === "name" && (prev === "." ||
+      ((prev === "{" || prev === ",") && toks[i + 1] && toks[i + 1].type.label === ":")) ? t.value : null;
+    if (prop && ES3_FUTURE_RESERVED.indexOf(prop) >= 0) {
+      errors.push(file + ":" + t.loc.start.line + " 屬性名稱「" + prop + "」是保留字：AE 會報 Illegal use of reserved word，請換名稱");
+    }
     const name = t.type.label === "name" && prev === "." ? t.value
       : t.type.label === "string" && prev === "[" && toks[i + 1] && toks[i + 1].type.label === "]" ? t.value : null;
     if (name && Object.prototype.hasOwnProperty.call(FORBIDDEN_MEMBERS, name)) {

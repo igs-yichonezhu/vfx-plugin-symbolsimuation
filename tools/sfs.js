@@ -143,7 +143,8 @@ function save(file, cfg) {
   out.symbols.forEach((s) => { s.path = rel(s.path); });
   out.frame.path = rel(out.frame.path);
   out.lineStyle.cellPath = rel(out.lineStyle.cellPath);
-  fs.writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
+  fs.mkdirSync(base, { recursive: true });
+  fs.writeFileSync(file,JSON.stringify(out, null, 2) + "\n");
 }
 
 function textArg(v) {
@@ -778,9 +779,9 @@ function checkHS(cfg, plan, fps, opt, all) {
     console.log(JSON.stringify({
       ok: !all.length, mode: "holdspin", errors: all, warnings: plan ? plan.warnings : [], fps,
       rounds: plan ? plan.rounds.map((rd, k) => ({ round: k + 1, start: rd.start, firstStop: rd.firstStop, settle: rd.settle,
-        cells: rd.cells.map((i) => plan.cells[i].tag), locks: rd.locks.map((i) => ({ cell: plan.cells[i].tag, symbol: plan.cells[i].final })),
+        cells: rd.cells.map((i) => plan.cells[i].tag), locks: rd.locks.map((i) => ({ cell: plan.cells[i].tag, symbol: plan.cells[i].finalSym })),
         spinsLeft: rd.spinsLeft, spinsAfter: rd.spinsAfter, end: rd.end })) : [],
-      cells: plan ? plan.cells.map((cp) => ({ cell: cp.tag, start: cp.start, final: cp.final, lockRound: cp.lockRound,
+      cells: plan ? plan.cells.map((cp) => ({ cell: cp.tag, start: cp.start, final: cp.finalSym, lockRound: cp.lockRound,
         spins: cp.spins.map((sp) => ({ round: sp.round + 1, start: sp.start, stop: sp.stop, settle: sp.settle, result: sp.result, lock: sp.lock, ant: sp.ant, fill: sp.fill, speed: r2(sp.speed / plan.pitch) })) })) : [],
       frames: plan ? plan.frames.map((f) => ({ cell: plan.cells[f.cell].tag, start: f.start, end: f.end })) : [],
       markers: plan ? plan.markers.map((m) => ({ t: m.t, frame: Math.round(m.t * fps), label: m.label })) : [],
@@ -796,7 +797,7 @@ function checkHS(cfg, plan, fps, opt, all) {
   console.log("\n" + pad("回合", 6) + pad("起轉", 7) + pad("第一格停", 10) + pad("停妥", 7) + pad("轉", 4) + pad("鎖住（列-欄）", 26) + "剩餘次數");
   let left = cfg.hs.startSpins;
   plan.rounds.forEach((rd, k) => {
-    const locks = rd.locks.map((i) => plan.cells[i].tag + " " + plan.cells[i].final).join("、") || "-";
+    const locks = rd.locks.map((i) => plan.cells[i].tag + " " + plan.cells[i].finalSym).join("、") || "-";
     console.log(pad(String(k + 1) + (rd.ant ? "*" : ""), 6) + pad(r2(rd.start - T0), 7) + pad(r2(rd.firstStop - T0), 10) + pad(r2(rd.settle - T0), 7) +
       pad(rd.cells.length, 4) + pad(locks, 26) + left + " → " + rd.spinsLeft + (rd.locks.length ? " → " + rd.spinsAfter : "") +
       (rd.end === "full" ? "　全滿" : rd.end === "out" ? "　用完" : ""));

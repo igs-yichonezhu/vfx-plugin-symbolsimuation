@@ -1795,7 +1795,7 @@ var SFS = SFS || {};
                 y = yEnd;
             }
             plan.cells.push({ index: cl.index, row: cl.row, col: cl.col, tag: cl.tag, x: cl.x, y: cl.y, start: cl.start,
-                final: plan.finalBoard[cl.col][cl.row], strip: strip.items, startIndex: strip.startIndex, startY: startY,
+                finalSym: plan.finalBoard[cl.col][cl.row], strip: strip.items, startIndex: strip.startIndex, startY: startY,
                 keys: keys, spins: spins, lockRound: cl.lockRound, lockTime: cl.lockTime });
         }
 
@@ -3880,7 +3880,7 @@ try {
                 var rd = res.plan.rounds[i], locks = [];
                 for (var j = 0; j < rd.locks.length; j++) {
                     var lc = res.plan.cells[rd.locks[j]];
-                    locks.push({ cell: lc.tag, symbol: lc.final });
+                    locks.push({ cell: lc.tag, symbol: lc.finalSym });
                 }
                 result.rounds.push({ round: i + 1, start: rd.start + offset, settle: rd.settle + offset, cells: rd.cells.length,
                     locks: locks, spinsLeft: rd.spinsLeft, spinsAfter: rd.spinsAfter, end: rd.end });
