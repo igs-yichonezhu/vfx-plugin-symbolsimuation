@@ -6,7 +6,7 @@
 var SFS = SFS || {};
 
 (function (S) {
-    S.VERSION = "1.5.0";
+    S.VERSION = "1.6.0";
     S.NAME = "SlotFakeSpin";
     S.TAG = "SFS_BOARD";
 
@@ -423,6 +423,35 @@ var SFS = SFS || {};
                 antFrame: true,        // 期待格繞框
                 lockPulse: 115         // 鎖住時符號跳動放大 %，100 = 不跳
             },
+            // 報獎：全部停妥後依 order 依序演出（S.win）。贏分 0、Free Game 0 場、彩金空白 = 不演
+            win: {
+                amount: 0,             // 總贏分
+                bet: 1,                // 押注（贏分 ÷ 押注 = 倍數，決定 Big Win 等級）
+                decimals: 0,           // 小數位數
+                prefix: "",            // 數字前綴，例如 $
+                meter: true,           // 一般贏分：盤面下方跑分（Big Win 時跟著一起跑）
+                meterLabel: "WIN",
+                meterTime: 1.2,        // 一般贏分跑分時間（秒）
+                meterPos: "",          // 跑分位置（目標合成座標 x,y）；空白 = 盤面正下方
+                tiers: "BIG WIN@10, MEGA WIN@25, SUPER WIN@50", // Big Win 等級：名稱@倍數（可加 #RRGGBB），由小到大
+                tierTime: 2.5,         // 每升一級跑幾秒
+                bigDelay: 1.0,         // Big Win 前先讓連線秀幾秒
+                hold: 2.0,             // 跑完停留（秒；Big Win / 彩金）
+                dim: 70,               // 壓暗 %
+                coins: 40,             // 金幣數（Big Win / 彩金），0 = 不噴
+                rays: true,            // 背後旋轉光芒
+                jpName: "",            // 彩金獎項，例如 MAJOR；空白 = 不演
+                jpAmount: 0,
+                jpTime: 1.5,           // 彩金跑分時間（秒）
+                fgCount: 0,            // Free Game 場數；0 = 不演
+                fgTitle: "FREE GAMES",
+                fgTime: 2.5,           // Free Game 字卡停留（秒）
+                order: "jp,win,fg",    // 演出順序：jp = 彩金、win = 贏分、fg = Free Game
+                delay: 0.3,            // 全部停妥後多久開始（秒）
+                gap: 0.3,              // 各段之間的間隔（秒）
+                size: 0,               // 標題字級 px，0 = 依盤面寬度自動
+                font: "Arial-BoldMT"   // 字型（PostScript 名稱），空白 = AE 預設
+            },
             // 盤面 [輪][列]，列 0 = 最上方
             startBoard: [],
             endBoard: []
@@ -487,10 +516,15 @@ var SFS = SFS || {};
                 });
             }
         }
-        var groups = ["layout", "spin", "antRule", "frame", "lineSet", "lineGen", "lineStyle", "quick", "hs"];
+        var groups = ["layout", "spin", "antRule", "frame", "lineSet", "lineGen", "lineStyle", "quick", "hs", "win"];
         for (var g = 0; g < groups.length; g++) {
             out[groups[g]] = copyTyped(def[groups[g]], cfg[groups[g]]);
         }
+        out.win.decimals = Math.round(U.clamp(out.win.decimals, 0, 4));
+        out.win.coins = Math.round(U.clamp(out.win.coins, 0, 200));
+        out.win.fgCount = Math.max(0, Math.round(out.win.fgCount));
+        out.win.dim = U.clamp(out.win.dim, 0, 100);
+        out.win.jpName = U.trim(out.win.jpName);
         out.mode = oneOf(cfg.mode, S.MODES, "reels");
         out.hs.order = oneOf(out.hs.order, HS.ORDERS, "col");
         out.hs.blank = U.trim(out.hs.blank);
@@ -1184,6 +1218,7 @@ var SFS = SFS || {};
         for (i = 0; i < nonNeg.length; i++) {
             if (P[nonNeg[i]] < 0) { e.push(T("手感參數不能是負數：{0}", nonNeg[i])); }
         }
+        e = e.concat(S.win.validate(cfg));
         if (cfg.mode === "holdspin") { return e.concat(HS.validate(cfg, names)); }
         var bw = L.reels * L.cellW + (L.reels - 1) * L.gapX + 2 * L.margin;
         var bh = S.reelHeight(L) + 2 * L.margin;
@@ -1249,8 +1284,14 @@ var SFS = SFS || {};
     // ------------------------------------------------------------------
     S.INF_LINEAR = 100 / 3;
 
+    // 轉輪 / Hold & Spin 的計畫，再接上報獎（全部停妥後）
     S.computePlan = function (cfg, fps, opts) {
-        if (cfg.mode === "holdspin") { return HS.computePlan(cfg, fps, opts); }
+        var plan = cfg.mode === "holdspin" ? HS.computePlan(cfg, fps, opts) : reelsPlan(cfg, fps, opts);
+        if (plan.markers && !plan.errors.length) { S.win.attach(plan, cfg, fps); }
+        return plan;
+    };
+
+    function reelsPlan(cfg, fps, opts) {
         opts = opts || {};
         var L = cfg.layout, P = cfg.spin, F = cfg.frame;
         var errors = [], warnings = [];
@@ -1397,7 +1438,7 @@ var SFS = SFS || {};
         }
         plan.markers = mergeMarkers(plan.markers);
         return plan;
-    };
+    }
 
     // 依 AE 的時間 Bezier 規則計算關鍵影格在時間 t 的值（給預覽 / 檢查用，和 AE 結果一致）
     S.evalKeys = function (keys, t) {
@@ -1961,6 +2002,318 @@ var SFS = SFS || {};
             if (lastShot && Math.abs(lastShot.t - shots[i].t - offset) < 1e-6) { lastShot.label += " / " + shots[i].label; }
             else { out.push({ t: shots[i].t + offset, label: shots[i].label }); }
         }
+        return out;
+    };
+
+    // ------------------------------------------------------------------
+    // 報獎（win）：全部停妥後依 win.order 依序演出
+    //   win = 贏分：沒到 Big Win 門檻就在盤面下方跑分；到了就全畫面壓暗、標題逐級升級（BIG → MEGA → …）、跑分、噴金幣
+    //   jp  = 彩金字卡：獎項名稱 + 金額跑分
+    //   fg  = Free Game 字卡：標題 + 場數
+    // plan.win 的位置都是盤面合成座標（AE 換算到目標合成；預覽直接用）。跑分數字在 AE 用 Source Text 表達式（countExpr），
+    // 預覽用 countAt 算同樣的值。
+    // ------------------------------------------------------------------
+    var WIN = S.win = {};
+    WIN.KEYS = ["jp", "win", "fg"];
+    WIN.FADE = 0.3;                                   // 字卡淡出（秒）
+    WIN.DIM_IN = 0.2;                                 // 壓暗淡入（秒）
+    WIN.POP = [[0, 0], [0.18, 125], [0.3, 100]];      // 標題彈出：[秒, 縮放 %]
+    WIN.BUMP = [[0, 100], [0.12, 118], [0.3, 100]];   // 跑完跳一下
+    WIN.RAYS_SPEED = 25;                              // 光芒每秒轉幾度
+    WIN.TIER_COLORS = ["#FFD54A", "#FF9F2E", "#FF4FD8", "#5CE1FF", "#9DFF5C"];
+    WIN.JP_COLORS = { GRAND: "#FF4D4D", MAJOR: "#C77DFF", MINOR: "#4DA6FF", MINI: "#5CE65C" };
+    WIN.FG_COLOR = "#6FE3FF";
+
+    // "BIG WIN@10, MEGA WIN@25#FF9F2E" -> { tiers: [{ name, at, color }]（倍數由小到大）, errors }
+    WIN.parseTiers = function (text) {
+        var out = [], errors = [], parts = String(text || "").split(/[\n,，;；]+/), i;
+        for (i = 0; i < parts.length; i++) {
+            var p = U.trim(parts[i]);
+            if (p === "") { continue; }
+            var m = /^(.*?)\s*[@＠]\s*([\d.]+)\s*[xX×]?\s*(#[0-9A-Fa-f]{6})?$/.exec(p);
+            if (!m || U.trim(m[1]) === "" || !(parseFloat(m[2]) > 0)) {
+                errors.push(T("Big Win 等級格式是「名稱@倍數」，例如 BIG WIN@10，目前是「{0}」", p));
+                continue;
+            }
+            out.push({ name: U.trim(m[1]), at: parseFloat(m[2]), color: m[3] ? m[3].toUpperCase() : "" });
+        }
+        out.sort(function (a, b) { return a.at - b.at; });
+        for (i = 0; i < out.length; i++) {
+            if (!out[i].color) { out[i].color = WIN.TIER_COLORS[Math.min(i, WIN.TIER_COLORS.length - 1)]; }
+        }
+        return { tiers: out, errors: errors };
+    };
+
+    // "win, fg" -> ["win", "fg", "jp"]：沒寫到的依預設順序補在後面
+    WIN.parseOrder = function (text) {
+        var out = [], parts = String(text || "").toLowerCase().split(/[\s,，;>]+/), i;
+        for (i = 0; i < parts.length; i++) {
+            if (U.indexOf(WIN.KEYS, parts[i]) >= 0 && U.indexOf(out, parts[i]) < 0) { out.push(parts[i]); }
+        }
+        for (i = 0; i < WIN.KEYS.length; i++) { if (U.indexOf(out, WIN.KEYS[i]) < 0) { out.push(WIN.KEYS[i]); } }
+        return out;
+    };
+
+    WIN.validate = function (cfg) {
+        var W = cfg.win, e = [];
+        if (W.amount < 0) { e.push(T("贏分不能是負數")); }
+        if (W.amount > 0 && !(W.bet > 0)) { e.push(T("押注必須大於 0（用來算 Big Win 倍數）")); }
+        if (W.jpAmount < 0) { e.push(T("彩金金額不能是負數")); }
+        if (U.trim(W.meterPos) !== "" && !S.parsePosition(W.meterPos)) { e.push(T("跑分位置格式是「x,y」，目前是「{0}」", W.meterPos)); }
+        return e.concat(WIN.parseTiers(W.tiers).errors);
+    };
+
+    function winDigits(d) { return Math.max(0, Math.min(4, Math.round(d || 0))); }
+
+    // 1234567.5 -> "1,234,567"（無條件捨去到小數位數）
+    WIN.format = function (v, decimals, prefix) {
+        var d = winDigits(decimals), p = Math.pow(10, d);
+        var s = (Math.floor(v * p + 1e-6) / p).toFixed(d), a = s.split("."), w = a[0], o = "";
+        while (w.length > 3) { o = "," + w.slice(-3) + o; w = w.slice(0, -3); }
+        return (prefix || "") + w + o + (a.length > 1 ? "." + a[1] : "");
+    };
+
+    // 跑分：T / V 是分段的時間 / 數值，段內等速，最後一段減速靠站
+    WIN.countAt = function (Ts, Vs, t) {
+        var n = Ts.length;
+        if (t >= Ts[n - 1]) { return Vs[n - 1]; }
+        if (t <= Ts[0]) { return Vs[0]; }
+        for (var i = 0; i < n - 1; i++) {
+            if (t < Ts[i + 1]) {
+                var u = (t - Ts[i]) / (Ts[i + 1] - Ts[i]);
+                if (i === n - 2) { u = 1 - (1 - u) * (1 - u); }
+                return Vs[i] + (Vs[i + 1] - Vs[i]) * u;
+            }
+        }
+        return Vs[n - 1];
+    };
+
+    function xnum(v) { return String(Math.round(v * 10000) / 10000); }
+    function xstr(s) { return "\"" + String(s).replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\""; }
+
+    // 跑分數字的 Source Text 表達式（和 countAt + format 相同的結果）
+    WIN.countExpr = function (Ts, Vs, decimals, prefix) {
+        var t = [], v = [], i;
+        for (i = 0; i < Ts.length; i++) { t.push(xnum(Ts[i])); v.push(String(Vs[i])); }
+        return "var T=[" + t.join(",") + "],V=[" + v.join(",") + "],n=T.length,t=time,v=V[0];\n" +
+            "if(t>=T[n-1]){v=V[n-1];}else if(t>T[0]){for(var i=0;i<n-1;i++){if(t<T[i+1]){var u=(t-T[i])/(T[i+1]-T[i]);" +
+            "if(i==n-2){u=1-(1-u)*(1-u);}v=V[i]+(V[i+1]-V[i])*u;break;}}}\n" +
+            "var p=Math.pow(10," + winDigits(decimals) + "),s=(Math.floor(v*p+1e-6)/p).toFixed(" + winDigits(decimals) + "),a=s.split(\".\"),w=a[0],o=\"\";\n" +
+            "while(w.length>3){o=\",\"+w.slice(-3)+o;w=w.slice(0,-3);}\n" +
+            xstr(prefix || "") + "+w+o+(a.length>1?\".\"+a[1]:\"\");";
+    };
+
+    // 金幣位置表達式（AE / EffectCraft）：每顆錯開出發，拋物線落下，每 life 秒重新噴一次（每輪方向不同）
+    // o：{ t0, life, stagger, x, y, vx, vy0, vy1, g }（目標合成座標 / px 每秒）
+    WIN.coinExpr = function (o) {
+        return "var t0=" + xnum(o.t0) + ",life=" + xnum(o.life) + ";seedRandom(index,true);var d=random(0," + xnum(o.stagger) + ");" +
+            "var k=time-t0-d,r=[-9999,-9999];\n" +
+            "if(k>=0){var c=Math.floor(k/life),u=k-c*life;seedRandom(index*97+c,true);" +
+            "var vx=random(-" + xnum(o.vx) + "," + xnum(o.vx) + "),vy=random(" + xnum(o.vy0) + "," + xnum(o.vy1) + ");" +
+            "r=[" + xnum(o.x) + "+vx*u," + xnum(o.y) + "-vy*u+" + xnum(o.g / 2) + "*u*u];}\nr;";
+    };
+
+    // 金幣翻面（scale X 隨時間變化）
+    WIN.coinSpinExpr = function (scale) {
+        return "var s=" + xnum(scale) + ";[s*Math.cos(time*8+index),s];";
+    };
+
+    // 關鍵影格表 [[秒, 值]] 在 dt 的值（線性，和 AE 預設內插相同）
+    WIN.keysAt = function (keys, dt) {
+        if (dt <= keys[0][0]) { return keys[0][1]; }
+        for (var i = 0; i < keys.length - 1; i++) {
+            if (dt < keys[i + 1][0]) {
+                return keys[i][1] + (keys[i + 1][1] - keys[i][1]) * (dt - keys[i][0]) / (keys[i + 1][0] - keys[i][0]);
+            }
+        }
+        return keys[keys.length - 1][1];
+    };
+
+    // 字卡（壓暗 / 光芒）的不透明度 0~1：start 淡入、end 之後淡出
+    WIN.cardAlpha = function (start, end, t) {
+        if (t < start || t > end + WIN.FADE) { return 0; }
+        if (t < start + WIN.DIM_IN) { return (t - start) / WIN.DIM_IN; }
+        if (t <= end) { return 1; }
+        return 1 - (t - end) / WIN.FADE;
+    };
+
+    // 接在 plan 後面：plan.win、標記、延長 plan.endTime
+    WIN.attach = function (plan, cfg, fps) {
+        var W = cfg.win, L = cfg.layout;
+        function snap(t) { return Math.round(t * fps) / fps; }
+        var amount = Math.max(0, W.amount), bet = W.bet > 0 ? W.bet : 1;
+        var bw = plan.boardW, bh = plan.boardH, c = [bw / 2, bh / 2];
+        var size = W.size > 0 ? W.size : Math.round(U.clamp(bw * 0.14, 40, 260));
+        var numSize = Math.round(size * 0.9), meterSize = Math.round(U.clamp(L.cellH * 0.26, 20, 72));
+        var margin = plan.margin || 0;
+        var w = {
+            amount: amount, bet: bet, mult: amount / bet, decimals: winDigits(W.decimals), prefix: W.prefix,
+            size: size, autoSize: !(W.size > 0), numSize: numSize, meterSize: meterSize, dim: W.dim / 100, rays: !!W.rays, coins: W.coins,
+            font: W.font, meterLabel: W.meterLabel, meterPos: S.parsePosition(W.meterPos),
+            center: c,
+            pos: {
+                title: [c[0], c[1] - size * 0.45],
+                number: [c[0], c[1] + numSize * 0.75],
+                fgTitle: [c[0], c[1] - size * 0.55],
+                fgCount: [c[0], c[1] + size * 0.7],
+                // 跑分：留白夠就放在留白裡，不夠就放在盤面正下方
+                meter: [c[0], margin >= meterSize * 1.4 ? bh - margin / 2 : bh - margin + meterSize * 0.9]
+            },
+            coin: { size: Math.round(size * 0.45), life: 1.5, stagger: 0.8, from: [c[0], c[1] + size * 0.3],
+                vx: bw * 0.5, vy0: bh * 1.5, vy1: bh * 2.3, g: bh * 3.6 },
+            meter: null, big: null, cards: [], shots: [], labels: [], start: -1, end: plan.allSettled, any: false
+        };
+        function mark(t, label, shot) {
+            plan.markers.push({ t: t, label: label });
+            w.labels.push(label);
+            if (shot) { w.shots.push({ t: t + shot, label: label }); }
+        }
+        var tiers = WIN.parseTiers(W.tiers).tiers, hold = Math.max(0, W.hold), gap = Math.max(0, W.gap);
+        var cursor = snap(plan.allSettled + Math.max(0, W.delay)), order = WIN.parseOrder(W.order), i, k;
+        for (k = 0; k < order.length; k++) {
+            var key = order[k];
+            if (key === "win" && amount > 0) {
+                var reached = [];
+                for (i = 0; i < tiers.length; i++) { if (w.mult >= tiers[i].at - 1e-9) { reached.push(tiers[i]); } }
+                if (!reached.length) {
+                    // 一般贏分：盤面下方跑分
+                    var ce = snap(cursor + Math.max(1 / fps, W.meterTime));
+                    if (W.meter) { w.meter = { start: cursor, countEnd: ce, T: [cursor, ce], V: [0, amount] }; }
+                    mark(cursor, "WIN", 0);
+                    mark(ce, "WIN COUNT END", 0.35);
+                    cursor = snap(ce + gap);
+                    continue;
+                }
+                // Big Win：每一級跑 tierTime 秒，跨過門檻時換下一級標題
+                var bs = snap(cursor + Math.max(0, W.bigDelay)), tt = Math.max(0.2, W.tierTime), Ts = [], Vs = [], list = [];
+                for (i = 0; i < reached.length; i++) {
+                    var ts = snap(bs + i * tt);
+                    Ts.push(ts);
+                    Vs.push(i === 0 ? 0 : reached[i].at * bet);
+                    list.push({ name: reached[i].name, at: reached[i].at, color: reached[i].color, start: ts, end: 0 });
+                    mark(ts, String(reached[i].name).toUpperCase(), 0.4);
+                }
+                var be = snap(bs + reached.length * tt), bend = snap(be + hold);
+                Ts.push(be);
+                Vs.push(amount);
+                for (i = 0; i < list.length; i++) { list[i].end = i + 1 < list.length ? list[i + 1].start : bend; }
+                w.big = { start: bs, countEnd: be, end: bend, T: Ts, V: Vs, tiers: list };
+                if (W.meter) { w.meter = { start: bs, countEnd: be, T: Ts, V: Vs }; }
+                mark(be, "WIN COUNT END", 0.35);
+                cursor = snap(bend + WIN.FADE + gap);
+            } else if (key === "jp" && W.jpName !== "") {
+                var jn = W.jpName, js = cursor, jc = snap(js + 0.3), je = snap(jc + Math.max(0.2, W.jpTime));
+                w.cards.push({ kind: "jp", title: jn, color: WIN.JP_COLORS[jn.toUpperCase()] || WIN.TIER_COLORS[0],
+                    start: js, countEnd: je, end: snap(je + hold), T: [jc, je], V: [0, Math.max(0, W.jpAmount)] });
+                mark(js, "JACKPOT " + jn.toUpperCase(), 0.4);
+                mark(je, "JACKPOT COUNT END", 0.35);
+                cursor = snap(je + hold + WIN.FADE + gap);
+            } else if (key === "fg" && W.fgCount > 0) {
+                var fs = cursor, fe = snap(fs + Math.max(0.5, W.fgTime));
+                w.cards.push({ kind: "fg", title: W.fgTitle, count: W.fgCount, color: WIN.FG_COLOR, start: fs, numAt: snap(fs + 0.25), end: fe });
+                mark(fs, "FREE GAMES " + W.fgCount, 0.6);
+                cursor = snap(fe + WIN.FADE + gap);
+            }
+        }
+        var ends = [];
+        if (w.meter) { ends.push(w.meter.countEnd + 0.3); w.start = w.meter.start; }
+        if (w.big) { ends.push(w.big.end + WIN.FADE); }
+        for (i = 0; i < w.cards.length; i++) { ends.push(w.cards[i].end + WIN.FADE); }
+        for (i = 0; i < ends.length; i++) { if (ends[i] > w.end) { w.end = ends[i]; } }
+        w.any = ends.length > 0;
+        if (w.any) {
+            var first = [];
+            if (w.meter) { first.push(w.meter.start); }
+            if (w.big) { first.push(w.big.start); }
+            for (i = 0; i < w.cards.length; i++) { first.push(w.cards[i].start); }
+            w.start = Math.min.apply(Math, first);
+            if (w.end > plan.endTime) { plan.endTime = w.end; }
+        }
+        plan.win = w;
+        plan.markers = mergeMarkers(plan.markers);
+        return w;
+    };
+
+    // 某個時間的報獎畫面（預覽用）：{ dim, rays, texts, coins, meter }；金幣是近似（AE 用自己的亂數）
+    WIN.sample = function (w, t) {
+        var out = { dim: 0, rays: [], texts: [], coins: [], meter: null }, i, a;
+        if (!w || !w.any) { return out; }
+        function pop(start, keys) { return WIN.keysAt(keys || WIN.POP, t - start) / 100; }
+        function text(s, pos, size, color, scale, alpha) {
+            if (alpha > 0 && scale > 0) { out.texts.push({ text: s, x: pos[0], y: pos[1], size: size, color: color, scale: scale, alpha: alpha }); }
+        }
+        function fadeOut(end) { return t <= end ? 1 : Math.max(0, 1 - (t - end) / WIN.FADE); }
+        function coins(start, end, color) {
+            var C = w.coin;
+            // 小的種子前幾個亂數很接近，先打散種子、丟掉第一個
+            function rng(seed) { var r = new S.Rng((seed * 48271) % 2147483646 + 1); r.next(); return r; }
+            for (var j = 0; j < w.coins; j++) {
+                var r1 = rng((j + 1) * 7919), d = r1.next() * C.stagger, kk = t - start - d;
+                if (kk < 0 || t > end + WIN.FADE) { continue; }
+                var cyc = Math.floor(kk / C.life), u = kk - cyc * C.life, r2 = rng((j + 1) * 97 + cyc + 1);
+                var vx = (r2.next() * 2 - 1) * C.vx, vy = C.vy0 + r2.next() * (C.vy1 - C.vy0);
+                out.coins.push({ x: C.from[0] + vx * u, y: C.from[1] - vy * u + C.g / 2 * u * u, r: C.size / 2,
+                    sx: Math.cos(t * 8 + j + 1), alpha: fadeOut(end), color: color });
+            }
+        }
+        function card(start, end, color) {
+            a = WIN.cardAlpha(start, end, t);
+            if (a <= 0) { return false; }
+            out.dim = Math.max(out.dim, a * w.dim);
+            if (w.rays) { out.rays.push({ x: w.center[0], y: w.center[1], r: Math.max(w.center[0], w.center[1]) * 1.5, angle: t * WIN.RAYS_SPEED, alpha: a * 0.35, color: color }); }
+            return true;
+        }
+        if (w.meter && t >= w.meter.start) {
+            out.meter = { text: (w.meterLabel ? w.meterLabel + " " : "") + WIN.format(WIN.countAt(w.meter.T, w.meter.V, t), w.decimals, w.prefix),
+                x: w.pos.meter[0], y: w.pos.meter[1], size: w.meterSize, scale: pop(w.meter.countEnd, WIN.BUMP) };
+        }
+        if (w.big && card(w.big.start, w.big.end, w.big.tiers[0].color)) {
+            var B = w.big;
+            for (i = 0; i < B.tiers.length; i++) {
+                var tr = B.tiers[i], last = i === B.tiers.length - 1;
+                if (t >= tr.start && (last || t < tr.end)) { text(tr.name, w.pos.title, w.size, tr.color, pop(tr.start), last ? fadeOut(B.end) : 1); }
+            }
+            text(WIN.format(WIN.countAt(B.T, B.V, t), w.decimals, w.prefix), w.pos.number, w.numSize, "#FFFFFF", pop(B.countEnd, WIN.BUMP), fadeOut(B.end));
+            if (w.coins > 0) { coins(B.start, B.end, B.tiers[B.tiers.length - 1].color); }
+        }
+        for (i = 0; i < w.cards.length; i++) {
+            var cd = w.cards[i];
+            if (!card(cd.start, cd.end, cd.color)) { continue; }
+            if (cd.kind === "jp") {
+                text(cd.title, w.pos.title, w.size, cd.color, pop(cd.start), fadeOut(cd.end));
+                if (cd.V[1] > 0) { text(WIN.format(WIN.countAt(cd.T, cd.V, t), w.decimals, w.prefix), w.pos.number, w.numSize, "#FFFFFF", pop(cd.countEnd, WIN.BUMP), fadeOut(cd.end)); }
+                if (w.coins > 0) { coins(cd.start, cd.end, cd.color); }
+            } else {
+                text(cd.title, w.pos.fgTitle, Math.round(w.size * 0.75), cd.color, pop(cd.start), fadeOut(cd.end));
+                if (t >= cd.numAt) { text(String(cd.count), w.pos.fgCount, Math.round(w.size * 1.5), "#FFFFFF", pop(cd.numAt), fadeOut(cd.end)); }
+            }
+        }
+        return out;
+    };
+
+    // 給命令列 / 面板看的摘要（每項一行）
+    WIN.describe = function (w) {
+        var out = [], i;
+        if (!w || !w.any) { return out; }
+        function r2(v) { return Math.round(v * 100) / 100; }
+        var all = [];
+        if (w.big) {
+            var names = [];
+            for (i = 0; i < w.big.tiers.length; i++) { names.push(w.big.tiers[i].name); }
+            all.push({ t: w.big.start, text: T("{0}：{1}（{2} 倍），{3}~{4} 秒跑分、停到 {5} 秒", names.join(" → "), WIN.format(w.amount, w.decimals, w.prefix), r2(w.mult), r2(w.big.start), r2(w.big.countEnd), r2(w.big.end)) });
+        } else if (w.meter) {
+            all.push({ t: w.meter.start, text: T("贏分 {0}（{1} 倍），{2}~{3} 秒跑分", WIN.format(w.amount, w.decimals, w.prefix), r2(w.mult), r2(w.meter.start), r2(w.meter.countEnd)) });
+        }
+        for (i = 0; i < w.cards.length; i++) {
+            var cd = w.cards[i];
+            if (cd.kind === "jp") {
+                all.push({ t: cd.start, text: T("彩金 {0} {1}，{2} 秒出現、停到 {3} 秒", cd.title, WIN.format(cd.V[1], w.decimals, w.prefix), r2(cd.start), r2(cd.end)) });
+            } else {
+                all.push({ t: cd.start, text: T("{0} {1} 場，{2}~{3} 秒", cd.title, cd.count, r2(cd.start), r2(cd.end)) });
+            }
+        }
+        all.sort(function (a, b) { return a.t - b.t; });
+        for (i = 0; i < all.length; i++) { out.push(all[i].text); }
         return out;
     };
 })(SFS);

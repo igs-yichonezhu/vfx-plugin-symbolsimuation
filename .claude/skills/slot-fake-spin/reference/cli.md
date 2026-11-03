@@ -16,6 +16,7 @@
 | 重新產生各輪 | `regen P`（放棄手動微調、回到快速節奏） |
 | 期待感建議 | `suggest P`（只看理由）、`suggest P --apply`（寫入） |
 | 連線 | `lines P --detect`、`--clear`、`--timing`、`--add 1,2,3,2,1:5:0.3+1.2`、`--add 2,0,1,0,2:box` |
+| 報獎 | `win P --amount 4250 --bet 100 [--fg 10] [--jp MAJOR:50000\|off] [--tiers "BIG WIN@10,MEGA WIN@25"] [--order jp,win,fg] [--off]`（見下方「報獎」） |
 | 檢查 | `check P [--fps 30]`、`check P --json` |
 | 預覽 | `render P --boards b.png --sheet k.png --gif a.gif [--scale 0.5] [--fps 30]` |
 | 符號總覽 | `symbols-sheet <資料夾\|P> out.png` |
@@ -69,6 +70,21 @@ aep-kit 的內容：`preset.json`（符號路徑改成 `assets/...` 相對路徑
 回報內容同 `ae`，盤面合成名稱是 EffectCraft 裡的實際名稱（`--board` / 更新模式用這個名稱）。失敗時（找不到合成、腳本錯誤）專案不會被修改。
 
 找 CLI 的順序：環境變數 `SFS_EC` → `%LOCALAPPDATA%\Programs\ArtCraft\effectcraft-*\effectcraft-cli.exe`（最新版）→ PATH 上的 `effectcraft-cli`。
+
+## 報獎（win）
+
+全部停妥後，依 `win.order`（預設 `jp,win,fg`）依序演出；一般轉輪和 Hold & Spin 都能用。
+
+| 段落 | 什麼時候演 | 畫面 |
+| --- | --- | --- |
+| 贏分 `win` | `win.amount > 0` | 倍數（贏分 ÷ 押注）沒到第一個 Big Win 門檻：盤面下方跑分 `WIN 1,250`（`win.meterTime` 秒）。到了：先讓連線秀 `win.bigDelay` 秒 → 全畫面壓暗、光芒、標題彈出、跑分；跑過下一級門檻時換標題（BIG → MEGA → SUPER，每級 `win.tierTime` 秒），最後一段減速靠站、跳一下、停留 `win.hold` 秒、噴金幣 |
+| 彩金 `jp` | `win.jpName` 不是空白 | 獎項名稱（GRAND / MAJOR / MINOR / MINI 有預設顏色）+ 金額跑分（`win.jpTime` 秒）、停留 `win.hold` 秒、金幣 |
+| Free Game `fg` | `win.fgCount > 0` | `win.fgTitle`（預設 FREE GAMES）+ 場數，停留 `win.fgTime` 秒 |
+
+- `check` 會多一行「報獎」時間表、文字時間軸多一列 `WIN`（`$` 跑分、Big Win 各級用名稱開頭字母、`J` 彩金、`F` Free Game），標記多了 `WIN`、各級名稱（`BIG WIN`、`MEGA WIN`…）、`WIN COUNT END`、`JACKPOT <名稱>`、`JACKPOT COUNT END`、`FREE GAMES <場數>`（音效對點用）；`check --json` 有 `win` 欄位。
+- `render` 的關鍵畫面多了每一級彈出後、跑分結束後、字卡的畫面（預覽畫在盤面範圍內；金幣軌跡和 AE 不同）。
+- AE / EffectCraft：建一個和目標合成一樣大的 `<盤面合成>_Win` 合成，放在盤面圖層正上方（同一個資料夾）；更新盤面時一起重建，報獎全關時刪掉。跑分數字是 Source Text 表達式，金幣是表達式拋物線（每顆 2 個橢圓形狀），標題是文字圖層（字型 `win.font`），都可以再換成美術圖。
+- 字卡以盤面中心為準；`win.size = 0` 時字級 = 盤面寬 × 0.14，在 AE 裡至少是畫面短邊的 12%（單輪彩金滾輪這種小盤面也看得清楚）。跑分預設在盤面正下方，遊戲畫面已經有 WIN 框時用 `win.meterPos=x,y` 對過去。
 
 ## Hold & Spin（重轉模式，Link 系列）
 
@@ -180,6 +196,20 @@ node tools/sfs.js from-psd <檔案.psd> --out work/<案子>/preset.json [選項]
 | lockPulse | 鎖住時跳動放大 %（100 = 不跳） | 115 |
 
 `endBoard` 在 Hold & Spin 是推演出來的最後盤面（`hs-board` 會寫入，給 `show` / 讀回用）。
+
+### win（報獎）
+| 欄位 | 說明 | 預設 |
+| --- | --- | --- |
+| amount / bet | 總贏分 / 押注（倍數 = 贏分 ÷ 押注）；贏分 0 = 不演 | 0 / 1 |
+| decimals / prefix | 小數位數（無條件捨去）/ 數字前綴（例如 `$`） | 0 / 空 |
+| meter / meterLabel / meterTime / meterPos | 盤面下方跑分 / 字樣 / 一般贏分跑幾秒 / 位置（目標合成座標 `x,y`，空白 = 盤面正下方） | true / WIN / 1.2 / 空 |
+| tiers | Big Win 等級 `名稱@倍數`，逗號分隔，可加 `#RRGGBB` | `BIG WIN@10, MEGA WIN@25, SUPER WIN@50` |
+| tierTime / bigDelay / hold | 每級跑幾秒 / Big Win 前先秀連線幾秒 / 跑完停留 | 2.5 / 1.0 / 2.0 |
+| dim / coins / rays | 壓暗 % / 金幣數（0 = 不噴）/ 背後光芒 | 70 / 40 / true |
+| jpName / jpAmount / jpTime | 彩金獎項（空白 = 不演）/ 金額 / 跑分秒數 | 空 / 0 / 1.5 |
+| fgCount / fgTitle / fgTime | Free Game 場數（0 = 不演）/ 標題 / 停留 | 0 / FREE GAMES / 2.5 |
+| order / delay / gap | 演出順序（`jp` `win` `fg`）/ 停妥後多久開始 / 各段間隔 | `jp,win,fg` / 0.3 / 0.3 |
+| size / font | 標題字級（0 = 自動）/ 字型 PostScript 名稱 | 0 / Arial-BoldMT |
 
 ### layout
 `reels rows cellW cellH gapX gapY peek margin scaleMode symbolScale target newCompFps position`

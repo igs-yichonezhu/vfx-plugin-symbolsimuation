@@ -11,6 +11,7 @@
  *  hs.test.js    Hold & Spin 重轉模式（推演、每格轉動計畫、模擬 AE 建置、命令列、EffectCraft）
  *  examples.test.js  examples/ 的範例與實際案例設定都能讀、驗證、算計畫
  *  aepkit.test.js    交付 .aep：ae --new-project / --save-aep、aep-kit（在模擬 AE 執行 build_aep.jsx）
+ *  win.test.js       報獎：Big Win 分級、跑分表達式、彩金 / Free Game 字卡、模擬 AE、命令列、面板
  */
 "use strict";
 const H = require("./helpers");
@@ -24,5 +25,6 @@ require("./quick.test");
 require("./hs.test");
 require("./examples.test");
 require("./aepkit.test");
+require("./win.test");
 console.log("\n" + H.results.passed + " passed, " + H.results.failed + " failed");
 process.exit(H.results.failed ? 1 : 0);

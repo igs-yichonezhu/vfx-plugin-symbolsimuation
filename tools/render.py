@@ -8,6 +8,7 @@ SlotFakeSpin 預覽繪製（需要 Pillow：pip install pillow）
 
 scene.json 由 tools/sfs.js 產生（關鍵影格用和 AE 相同的 Bezier 計算）。這只是預覽，最終以 AE 為準。
 Hold & Spin（mode = holdspin）的場景用 cells（每格一個視窗）取代 reels。
+報獎（frames[].win）畫在盤面範圍內；AE 裡是和目標合成一樣大的 _Win 合成，金幣軌跡也不同（AE 用自己的亂數）。
 """
 import json
 import math
@@ -169,6 +170,66 @@ def draw_line(img, ln):
     img.alpha_composite(over)
 
 
+def text_center(d, x, y, s, font, fill, stroke, stroke_fill):
+    try:
+        d.text((x, y), s, font=font, fill=fill, anchor="mm", stroke_width=stroke, stroke_fill=stroke_fill)
+    except (ValueError, TypeError):
+        # 點陣字型（找不到 TrueType 時）不支援 anchor / 描邊
+        d.text((x - d.textlength(s, font=font) / 2, y - getattr(font, "size", 10) / 2), s, font=font, fill=fill)
+
+
+def draw_win(img, ov):
+    """報獎（S.win.sample 的結果）：跑分 → 壓暗 → 光芒 → 標題 / 數字 → 金幣"""
+    if not ov:
+        return
+    W, H = img.size
+    m = ov.get("meter")
+    if m:
+        over = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(over)
+        s = int(m["size"] * m["scale"])
+        f = load_font(max(8, s))
+        w = max(d.textlength(m["text"], font=f) + s * 1.2, s * 7)
+        d.rounded_rectangle([m["x"] - w / 2, m["y"] - s * 0.8, m["x"] + w / 2, m["y"] + s * 0.8], radius=int(s * 0.4),
+                            fill=(13, 8, 20, 217), outline=(255, 200, 60, 255), width=max(1, int(s * 0.06)))
+        text_center(d, m["x"], m["y"], m["text"], f, (255, 255, 255, 255), max(1, int(s * 0.06)), (77, 77, 77, 255))
+        img.alpha_composite(over)
+    if ov.get("dim", 0) > 0:
+        img.alpha_composite(Image.new("RGBA", img.size, (0, 0, 0, int(255 * ov["dim"]))))
+    for r in ov.get("rays", []):
+        over = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(over)
+        col = tuple(int(c + (255 - c) * 0.2) for c in hex_rgb(r["color"])) + (int(255 * r["alpha"]),)
+        for i in range(16):
+            a = math.radians(r["angle"] + i * 22.5)
+            da = math.radians(2.2)
+            d.polygon([(r["x"], r["y"]), (r["x"] + r["r"] * math.cos(a - da), r["y"] + r["r"] * math.sin(a - da)),
+                       (r["x"] + r["r"] * math.cos(a + da), r["y"] + r["r"] * math.sin(a + da))], fill=col)
+        img.alpha_composite(over)
+    for t in ov.get("texts", []):
+        over = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(over)
+        s = int(t["size"] * t["scale"])
+        if s < 2:
+            continue
+        col = hex_rgb(t["color"], (255, 255, 255))
+        a = int(255 * t["alpha"])
+        text_center(d, t["x"], t["y"], t["text"], load_font(s), col + (a,), max(1, int(s * 0.06)),
+                    tuple(int(c * 0.3) for c in col) + (a,))
+        img.alpha_composite(over)
+    if ov.get("coins"):
+        over = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(over)
+        for c in ov["coins"]:
+            rx, ry = max(1.0, c["r"] * abs(c["sx"])), c["r"]
+            a = int(255 * c["alpha"])
+            if c["x"] + rx < 0 or c["x"] - rx > W or c["y"] + ry < 0 or c["y"] - ry > H:
+                continue
+            d.ellipse([c["x"] - rx, c["y"] - ry, c["x"] + rx, c["y"] + ry], fill=(255, 199, 38, a), outline=(140, 82, 0, a),
+                      width=max(1, int(c["r"] * 0.16)))
+        img.alpha_composite(over)
+
+
 def render_frame(sc, syms, fr):
     img = Image.new("RGBA", (sc["width"], sc["height"]), BG + (255,))
     for ri, reel in enumerate(sc["reels"]):
@@ -191,6 +252,7 @@ def render_frame(sc, syms, fr):
         paste_center(img, syms.get(w["name"], w["scale"]), w["cx"], w["cy"])
     for ln in fr["lines"]:
         draw_line(img, ln)
+    draw_win(img, fr.get("win"))
     return img
 
 

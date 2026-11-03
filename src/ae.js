@@ -681,6 +681,272 @@
         }
     }
 
+    // ---------------- 報獎 ----------------
+    // 報獎合成（和目標合成一樣大）放在盤面圖層正上方，和盤面合成同一個資料夾；更新盤面時一起重建
+    A.WIN_TAG = "SFS_WIN";
+
+    function findWinComp(folder) {
+        var found = null;
+        A.eachItem(function (it) {
+            if (it instanceof CompItem && it.comment === A.WIN_TAG && A.sameItem(it.parentFolder, folder)) { found = it; return false; }
+        });
+        return found;
+    }
+
+    function removeWinComp(wc) {
+        var users = [];
+        try { users = wc.usedIn; } catch (e) { users = []; }
+        for (var i = 0; i < users.length; i++) {
+            for (var k = users[i].numLayers; k >= 1; k--) {
+                var lyr = users[i].layer(k);
+                if (lyr.source && A.sameItem(lyr.source, wc)) { lyr.remove(); }
+            }
+        }
+        wc.remove();
+    }
+
+    function addFill(lyr, group, rgb) {
+        vecs(lyr, group).addProperty("ADBE Vector Graphic - Fill").property("ADBE Vector Fill Color").setValue([rgb[0], rgb[1], rgb[2], 1]);
+    }
+
+    function addEllipse(lyr, group, size, pos) {
+        var e = vecs(lyr, group).addProperty("ADBE Vector Shape - Ellipse");
+        e.property("ADBE Vector Ellipse Size").setValue(size);
+        e.property("ADBE Vector Ellipse Position").setValue(pos);
+    }
+
+    function addStar(lyr, group, points, outer, inner) {
+        var s = vecs(lyr, group).addProperty("ADBE Vector Shape - Star");
+        s.property("ADBE Vector Star Type").setValue(1);  // 1 = 星形
+        s.property("ADBE Vector Star Points").setValue(points);
+        s.property("ADBE Vector Star Outer Radius").setValue(outer);
+        s.property("ADBE Vector Star Inner Radius").setValue(inner);
+    }
+
+    // 置中的文字圖層；pos = 文字視覺中心（基線往下 0.35 字高）
+    function addTextLayer(comp, name, text, size, hex, pos, font) {
+        var lyr = comp.layers.addText(text);
+        lyr.name = name;
+        var p = lyr.property("ADBE Text Properties").property("ADBE Text Document");
+        var td = p.value, rgb = S.hexToRgb(hex, [1, 0.84, 0.29]);
+        td.fontSize = size;
+        // AE：applyFill / applyStroke 沒打開時讀寫顏色會丟錯，所以先打開
+        td.applyFill = true;
+        td.fillColor = rgb;
+        td.applyStroke = true;
+        td.strokeColor = [rgb[0] * 0.3, rgb[1] * 0.3, rgb[2] * 0.3];
+        td.strokeWidth = Math.max(2, Math.round(size * 0.06));
+        td.strokeOverFill = false;
+        td.justification = ParagraphJustification.CENTER_JUSTIFY;
+        if (font) {
+            try { td.font = font; } catch (eF) { /* 沒有這個字型就用預設 */ }
+        }
+        p.setValue(td);
+        lyr.transform.position.setValue([pos[0], pos[1] + size * 0.35]);
+        return lyr;
+    }
+
+    function keysFrom(prop, t0, table, k) {
+        for (var i = 0; i < table.length; i++) { key(prop, t0 + table[i][0], [table[i][1] * k, table[i][1] * k]); }
+    }
+
+    // 圖層 start 出現、end 之後淡出（fade = false 就在 end 消失）
+    function showSpan(lyr, start, end, fade) {
+        lyr.inPoint = start;
+        lyr.outPoint = fade ? end + S.win.FADE : end;
+        if (fade) {
+            key(lyr.transform.opacity, end, 100);
+            key(lyr.transform.opacity, end + S.win.FADE, 0);
+        }
+    }
+
+    // 字卡底下的壓暗 / 光芒：start 淡入、end 之後淡出
+    function cardFade(prop, start, end, top) {
+        key(prop, start, 0);
+        key(prop, start + S.win.DIM_IN, top);
+        key(prop, end, top);
+        key(prop, end + S.win.FADE, 0);
+    }
+
+    // 盤面合成座標 -> 目標合成座標（看盤面圖層的位置 / 錨點 / 縮放；不含旋轉、父子）
+    function boardMapper(boardLayer, t) {
+        var tr = boardLayer.transform, pos;
+        if (tr.position.dimensionsSeparated) {
+            pos = [tr.property("ADBE Position_0").valueAtTime(t, false), tr.property("ADBE Position_1").valueAtTime(t, false)];
+        } else {
+            pos = tr.position.numKeys ? tr.position.valueAtTime(t, false) : tr.position.value;
+        }
+        var a = tr.anchorPoint.value, s = tr.scale.value, kx = s[0] / 100, ky = s[1] / 100;
+        return {
+            k: Math.abs(kx),
+            at: function (q) { return [pos[0] + (q[0] - a[0]) * kx, pos[1] + (q[1] - a[1]) * ky]; }
+        };
+    }
+
+    // 字卡（Big Win / 彩金 / Free Game）用的換算：以盤面中心為準，字級自動時至少是畫面短邊的 12%（小盤面也看得清楚）
+    function cardMapper(wc, w, M) {
+        var ts = M.k;
+        if (w.autoSize) { ts = Math.max(ts, Math.min(wc.width, wc.height) * 0.12 / w.size); }
+        var c0 = M.at(w.center);
+        return {
+            k: ts,
+            at: function (p) { return [c0[0] + (p[0] - w.center[0]) * ts, c0[1] + (p[1] - w.center[1]) * ts]; }
+        };
+    }
+
+    function buildCoins(wc, w, M, start, end, color, tag) {
+        var C = w.coin, from = M.at(C.from), sz = C.size * M.k, rgb = S.hexToRgb(color, [1, 0.78, 0.15]);
+        var gold = [1, 0.78, 0.15], dark = [0.55, 0.32, 0], shine = [1, 0.95, 0.6];
+        for (var j = 0; j < w.coins; j++) {
+            var lyr = newShapeLayer(wc, "Coin " + tag + " " + (j + 1));
+            addGroup(lyr, "Shine");
+            addEllipse(lyr, "Shine", [sz * 0.45, sz * 0.45], [-sz * 0.12, -sz * 0.12]);
+            addFill(lyr, "Shine", shine);
+            addGroup(lyr, "Coin");
+            addEllipse(lyr, "Coin", [sz, sz], [0, 0]);
+            addFill(lyr, "Coin", j % 4 === 3 ? mixWhite(rgb, 0.3) : gold);
+            addStroke(lyr, "Coin", dark, Math.max(1, sz * 0.08));
+            lyr.transform.position.expression = S.win.coinExpr({ t0: start, life: C.life, stagger: C.stagger, x: from[0], y: from[1],
+                vx: C.vx * M.k, vy0: C.vy0 * M.k, vy1: C.vy1 * M.k, g: C.g * M.k });
+            lyr.transform.scale.expression = S.win.coinSpinExpr(100);
+            showSpan(lyr, start, end, true);
+            lyr.label = 2;
+        }
+    }
+
+    function buildRays(wc, w, M, start, end, color, tag) {
+        var lyr = newShapeLayer(wc, "Rays " + tag), c = M.at(w.center);
+        var r = Math.max(Math.max(w.center[0], w.center[1]) * 1.5 * M.k, Math.sqrt(wc.width * wc.width + wc.height * wc.height) * 0.6);
+        addGroup(lyr, "Rays");
+        addStar(lyr, "Rays", 16, r, r * 0.08);
+        addFill(lyr, "Rays", mixWhite(S.hexToRgb(color, [1, 0.84, 0.29]), 0.2));
+        lyr.transform.position.setValue(c);
+        lyr.transform.rotation.expression = "time*" + S.win.RAYS_SPEED;
+        cardFade(lyr.transform.opacity, start, end, 35);
+        lyr.inPoint = start;
+        lyr.outPoint = end + S.win.FADE;
+        lyr.label = 15;
+    }
+
+    // 跑分數字：表達式跑分、跑完跳一下
+    function buildCount(wc, w, M, name, Ts, Vs, size, pos, prefix, countEnd) {
+        var lyr = addTextLayer(wc, name, S.win.format(Vs[Vs.length - 1], w.decimals, prefix), size, "#FFFFFF", pos, w.font);
+        lyr.property("ADBE Text Properties").property("ADBE Text Document").expression = S.win.countExpr(Ts, Vs, w.decimals, prefix);
+        keysFrom(lyr.transform.scale, countEnd, S.win.BUMP, 1);
+        lyr.label = 15;
+        return lyr;
+    }
+
+    // 回傳報獎合成（沒有要演就刪掉舊的、回傳 null）
+    function buildWin(target, boardLayer, boardComp, plan, cfg, folder, duration, fps) {
+        var w = plan.win, wc = findWinComp(folder), i, k;
+        if (!w || !w.any) {
+            if (wc) { removeWinComp(wc); }
+            return null;
+        }
+        if (wc) {
+            while (wc.numLayers > 0) { wc.layer(1).remove(); }
+            wc.width = target.width;
+            wc.height = target.height;
+            wc.frameRate = fps;
+            if (wc.duration < duration) { wc.duration = duration; }
+        } else {
+            wc = app.project.items.addComp(boardComp.name + "_Win", target.width, target.height, target.pixelAspect || 1, duration, fps);
+            wc.parentFolder = folder;
+            wc.comment = A.WIN_TAG;
+        }
+        var wl = null;
+        for (i = 1; i <= target.numLayers; i++) {
+            if (target.layer(i).source && A.sameItem(target.layer(i).source, wc)) { wl = target.layer(i); break; }
+        }
+        if (!wl) {
+            wl = target.layers.add(wc);
+            wl.name = "Win";
+            try { wl.moveBefore(boardLayer); } catch (eMv) { /* 移不動就留在最上面 */ }
+        }
+        wl.startTime = boardLayer.startTime;
+        wl.comment = A.WIN_TAG;
+
+        var M = boardMapper(boardLayer, boardLayer.startTime + w.start), sc = M.k;
+        function at(p) { return M.at(p); }
+
+        // 跑分（最底下，Big Win 時一起被壓暗）
+        if (w.meter) {
+            var mp = w.meterPos || at(w.pos.meter), ms = w.meterSize * sc;
+            var bg = newShapeLayer(wc, "Win Meter BG");
+            addGroup(bg, "BG");
+            addRect(bg, "BG", [Math.max(w.center[0] * 0.9 * sc, ms * 7), ms * 1.6], mp, ms * 0.4);
+            addFill(bg, "BG", [0.05, 0.03, 0.08]);
+            addStroke(bg, "BG", [1, 0.78, 0.24], Math.max(1, ms * 0.06));
+            bg.transform.opacity.setValue(85);
+            bg.inPoint = w.meter.start;
+            bg.label = 15;
+            var mt = buildCount(wc, w, M, "Win Meter", w.meter.T, w.meter.V, ms, mp, (w.meterLabel ? w.meterLabel + " " : "") + w.prefix, w.meter.countEnd);
+            mt.inPoint = w.meter.start;
+        }
+
+        // 字卡共用一層壓暗
+        var cards = [];
+        if (w.big) { cards.push({ start: w.big.start, end: w.big.end }); }
+        for (i = 0; i < w.cards.length; i++) { cards.push(w.cards[i]); }
+        cards.sort(function (a, b) { return a.start - b.start; });
+        if (cards.length && w.dim > 0) {
+            var dim = newShapeLayer(wc, "Win Dim");
+            addGroup(dim, "Dim");
+            addRect(dim, "Dim", [wc.width, wc.height], [wc.width / 2, wc.height / 2], 0);
+            addFill(dim, "Dim", [0, 0, 0]);
+            for (i = 0; i < cards.length; i++) { cardFade(dim.transform.opacity, cards[i].start, cards[i].end, Math.round(w.dim * 100)); }
+            dim.inPoint = cards[0].start;
+            dim.outPoint = cards[cards.length - 1].end + S.win.FADE;
+            dim.label = 15;
+        }
+
+        M = cardMapper(wc, w, M);
+        var size = w.size * M.k, numSize = w.numSize * M.k;
+        if (w.big) {
+            var B = w.big, top = B.tiers[B.tiers.length - 1];
+            if (w.rays) { buildRays(wc, w, M, B.start, B.end, B.tiers[0].color, "Big"); }
+            for (k = 0; k < B.tiers.length; k++) {
+                var tr = B.tiers[k], last = k === B.tiers.length - 1;
+                var tl = addTextLayer(wc, "Title " + tr.name, tr.name, size, tr.color, at(w.pos.title), w.font);
+                keysFrom(tl.transform.scale, tr.start, S.win.POP, 1);
+                addGlow(tl);
+                showSpan(tl, tr.start, tr.end, last);
+                tl.label = 15;
+            }
+            var bn = buildCount(wc, w, M, "Big Win Count", B.T, B.V, numSize, at(w.pos.number), w.prefix, B.countEnd);
+            showSpan(bn, B.start, B.end, true);
+            if (w.coins > 0) { buildCoins(wc, w, M, B.start, B.end, top.color, "Big"); }
+        }
+        for (i = 0; i < w.cards.length; i++) {
+            var cd = w.cards[i], tag = cd.kind === "jp" ? "JP" : "FG";
+            if (w.rays) { buildRays(wc, w, M, cd.start, cd.end, cd.color, tag); }
+            if (cd.kind === "jp") {
+                var jt = addTextLayer(wc, "Title " + cd.title, cd.title, size, cd.color, at(w.pos.title), w.font);
+                keysFrom(jt.transform.scale, cd.start, S.win.POP, 1);
+                addGlow(jt);
+                showSpan(jt, cd.start, cd.end, true);
+                jt.label = 15;
+                if (cd.V[1] > 0) {
+                    var jn = buildCount(wc, w, M, "Jackpot Count", cd.T, cd.V, numSize, at(w.pos.number), w.prefix, cd.countEnd);
+                    showSpan(jn, cd.start, cd.end, true);
+                }
+                if (w.coins > 0) { buildCoins(wc, w, M, cd.start, cd.end, cd.color, tag); }
+            } else {
+                var ft = addTextLayer(wc, "Title " + cd.title, cd.title, Math.round(size * 0.75), cd.color, at(w.pos.fgTitle), w.font);
+                keysFrom(ft.transform.scale, cd.start, S.win.POP, 1);
+                addGlow(ft);
+                showSpan(ft, cd.start, cd.end, true);
+                ft.label = 15;
+                var fn = addTextLayer(wc, "Free Games Count", String(cd.count), Math.round(size * 1.5), "#FFFFFF", at(w.pos.fgCount), w.font);
+                keysFrom(fn.transform.scale, cd.numAt, S.win.POP, 1);
+                showSpan(fn, cd.numAt, cd.end, true);
+                fn.label = 15;
+            }
+        }
+        return wc;
+    }
+
     function resolveAsset(holder, idKey, nameKey, pathKey) {
         var entry = { name: holder[nameKey], path: holder[pathKey], itemId: holder[idKey] };
         if (!entry.name && !entry.path && !entry.itemId) { return null; }
@@ -894,6 +1160,7 @@
                 boardLayer.motionBlur = mb;
                 if (mb) { target.motionBlur = true; }
             }
+            result.winComp = buildWin(target, boardLayer, boardComp, plan, cfg, folder, duration, fps);
             boardLayer.comment = S.TAG;
             removeOldMarkers(boardLayer);
             var mk = boardLayer.property("ADBE Marker");

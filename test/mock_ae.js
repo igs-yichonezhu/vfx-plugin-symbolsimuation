@@ -200,6 +200,10 @@ function install(globalObj, opts) {
     "ADBE Vector Stroke Line Cap": 1, "ADBE Vector Stroke Line Join": 1,
     "ADBE Vector Trim Start": 0, "ADBE Vector Trim End": 100, "ADBE Vector Trim Offset": 0,
     "ADBE Vector Position": [0, 0], "ADBE Vector Scale": [100, 100], "ADBE Vector Group Opacity": 100,
+    "ADBE Vector Ellipse Size": [100, 100], "ADBE Vector Ellipse Position": [0, 0],
+    "ADBE Vector Star Type": 1, "ADBE Vector Star Points": 5, "ADBE Vector Star Position": [0, 0], "ADBE Vector Star Rotation": 0,
+    "ADBE Vector Star Inner Radius": 50, "ADBE Vector Star Outer Radius": 100,
+    "ADBE Vector Fill Color": [1, 0, 0, 1], "ADBE Vector Fill Opacity": 100,
   };
   const GROUP_SCHEMA = {
     "ADBE Vector Group": { name: "Group", children: ["ADBE Vectors Group", "ADBE Vector Transform Group"] },
@@ -207,6 +211,10 @@ function install(globalObj, opts) {
     "ADBE Vector Transform Group": { name: "Transform", children: ["ADBE Vector Position", "ADBE Vector Scale", "ADBE Vector Group Opacity"] },
     "ADBE Vector Shape - Rect": { name: "Rectangle Path", children: ["ADBE Vector Rect Size", "ADBE Vector Rect Position", "ADBE Vector Rect Roundness"] },
     "ADBE Vector Shape - Group": { name: "Path", children: ["ADBE Vector Shape"] },
+    "ADBE Vector Shape - Ellipse": { name: "Ellipse Path", children: ["ADBE Vector Ellipse Size", "ADBE Vector Ellipse Position"] },
+    "ADBE Vector Shape - Star": { name: "Polystar Path", children: ["ADBE Vector Star Type", "ADBE Vector Star Points", "ADBE Vector Star Position",
+      "ADBE Vector Star Rotation", "ADBE Vector Star Inner Radius", "ADBE Vector Star Outer Radius"] },
+    "ADBE Vector Graphic - Fill": { name: "Fill", children: ["ADBE Vector Fill Color", "ADBE Vector Fill Opacity"] },
     "ADBE Vector Graphic - Stroke": { name: "Stroke", children: ["ADBE Vector Stroke Color", "ADBE Vector Stroke Opacity", "ADBE Vector Stroke Width", "ADBE Vector Stroke Line Cap", "ADBE Vector Stroke Line Join"] },
     "ADBE Vector Filter - Trim": { name: "Trim Paths", children: ["ADBE Vector Trim Start", "ADBE Vector Trim End", "ADBE Vector Trim Offset"] },
     "ADBE Glo2": { name: "Glow", children: [] },
@@ -214,7 +222,8 @@ function install(globalObj, opts) {
     "ADBE Root Vectors Group": { name: "Contents", children: [], accepts: "vector" },
     "ADBE Effect Parade": { name: "Effects", children: [], accepts: "effect" },
   };
-  const VECTOR_ITEMS = ["ADBE Vector Group", "ADBE Vector Shape - Rect", "ADBE Vector Shape - Group", "ADBE Vector Graphic - Stroke", "ADBE Vector Filter - Trim"];
+  const VECTOR_ITEMS = ["ADBE Vector Group", "ADBE Vector Shape - Rect", "ADBE Vector Shape - Group", "ADBE Vector Shape - Ellipse", "ADBE Vector Shape - Star",
+    "ADBE Vector Graphic - Fill", "ADBE Vector Graphic - Stroke", "ADBE Vector Filter - Trim"];
   const EFFECTS = ["ADBE Glo2", "ADBE Brightness & Contrast 2"];
 
   function makeNode(mn) {
@@ -301,6 +310,25 @@ function install(globalObj, opts) {
     return { group: 1, layer: layer.id, path: 2 };
   }
 
+  // ---------------- 文字 ----------------
+  // TextDocument：applyFill / applyStroke 沒打開時讀寫顏色會丟錯（和 AE 一樣）
+  const ParagraphJustification = { LEFT_JUSTIFY: 7413, RIGHT_JUSTIFY: 7414, CENTER_JUSTIFY: 7415 };
+  class TextDocument {
+    constructor(text) {
+      this.text = String(text); this.fontSize = 36; this.font = "ArialMT"; this.justification = ParagraphJustification.LEFT_JUSTIFY;
+      this.applyFill = true; this.applyStroke = false; this._fill = [1, 1, 1]; this._stroke = [0, 0, 0]; this._sw = 1; this._sof = false;
+    }
+    _need(flag, what) { if (!this[flag]) throw new Error("TextDocument." + what + ": " + flag + " is false"); }
+    get fillColor() { this._need("applyFill", "fillColor"); return this._fill; }
+    set fillColor(v) { this._need("applyFill", "fillColor"); if (!Array.isArray(v) || v.length !== 3) throw new Error("fillColor expects [r,g,b]"); this._fill = v; }
+    get strokeColor() { this._need("applyStroke", "strokeColor"); return this._stroke; }
+    set strokeColor(v) { this._need("applyStroke", "strokeColor"); if (!Array.isArray(v) || v.length !== 3) throw new Error("strokeColor expects [r,g,b]"); this._stroke = v; }
+    get strokeWidth() { this._need("applyStroke", "strokeWidth"); return this._sw; }
+    set strokeWidth(v) { this._need("applyStroke", "strokeWidth"); this._sw = v; }
+    get strokeOverFill() { this._need("applyStroke", "strokeOverFill"); return this._sof; }
+    set strokeOverFill(v) { this._need("applyStroke", "strokeOverFill"); this._sof = !!v; }
+  }
+
   // ---------------- Items ----------------
   let nextId = 1;
   class Item {
@@ -354,6 +382,13 @@ function install(globalObj, opts) {
           l.name = "Shape Layer " + (self._layers.length + 1);
           l._outPoint = self.duration;
           l._contents = makeNode("ADBE Root Vectors Group");
+          return self._addLayer(l);
+        },
+        addText(text) {
+          const l = new Layer(self, null);
+          l.name = String(text);
+          l._outPoint = self.duration;
+          l._textDoc = new Property("Source Text", "ADBE Text Document", new TextDocument(text), { any: true });
           return self._addLayer(l);
         },
         get length() { return self._layers.length; },
@@ -418,6 +453,11 @@ function install(globalObj, opts) {
       }
       if (mn === "ADBE Transform Group" || mn === "Transform") return this.transform;
       if (mn === "ADBE Effect Parade" || mn === "Effects") return wrap(this._effects);
+      if (mn === "ADBE Text Properties" || mn === "Text") {
+        if (!this._textDoc) throw new Error("not a text layer");
+        const doc = this._textDoc;
+        return { property: (m) => (m === "ADBE Text Document" || m === "Source Text" ? doc : null) };
+      }
       if (mn === "ADBE Root Vectors Group" || mn === "Contents") {
         if (!this._contents) throw new Error("not a shape layer");
         return wrap(this._contents);
@@ -427,6 +467,12 @@ function install(globalObj, opts) {
     get position() { return this.transform.position; }
     moveToBeginning() { const L = this.containingComp._layers; L.splice(L.indexOf(this), 1); L.unshift(this); }
     moveToEnd() { const L = this.containingComp._layers; L.splice(L.indexOf(this), 1); L.push(this); }
+    moveBefore(other) {
+      if (other.containingComp !== this.containingComp) throw new Error("moveBefore: different comp");
+      const L = this.containingComp._layers;
+      L.splice(L.indexOf(this), 1);
+      L.splice(L.indexOf(other), 0, this);
+    }
     remove() { const L = this.containingComp._layers; L.splice(L.indexOf(this), 1); }
   }
 
@@ -517,7 +563,7 @@ function install(globalObj, opts) {
   }
 
   Object.assign(g, {
-    app, File, Folder, CompItem, FootageItem, FolderItem, AVItem, Layer, Property, Shape,
+    app, File, Folder, CompItem, FootageItem, FolderItem, AVItem, Layer, Property, Shape, TextDocument, ParagraphJustification,
     KeyframeEase, KeyframeInterpolationType, MarkerValue, ImportOptions, ImportAsType,
     alert: (m) => { (g.__alerts = g.__alerts || []).push(String(m)); },
     writeLn: (m) => { (g.__output = g.__output || []).push(String(m)); },

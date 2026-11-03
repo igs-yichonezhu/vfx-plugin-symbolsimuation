@@ -407,9 +407,9 @@
                     g.drawString(plan && plan.errors.length ? "⚠ " + plan.errors[0] : T("（尚無節奏）"), textPen, 6, 6, font);
                     return;
                 }
-                var n = plan.reels.length, hasLines = plan.lines.length > 0;
+                var n = plan.reels.length, hasLines = plan.lines.length > 0, wp = plan.win, hasWin = !!(wp && wp.any);
                 var labelW = 28, top = 4, axisH = 14;
-                var rowH = Math.max(6, Math.floor((h - top - axisH) / (n + (hasLines ? 1 : 0))));
+                var rowH = Math.max(6, Math.floor((h - top - axisH) / (n + (hasLines ? 1 : 0) + (hasWin ? 1 : 0))));
                 var T0 = plan.startTime, T1 = Math.max(plan.endTime, T0 + 0.5) + 0.15;
                 var sc = (w - labelW - 6) / (T1 - T0);
                 var X = function (t) { return labelW + (t - T0) * sc; };
@@ -447,6 +447,22 @@
                         }
                     }
                 }
+                if (hasWin) {
+                    // 報獎：細線 = 跑分、色塊 = Big Win 各級 / 彩金 / Free Game 字卡
+                    var wy = top + (n + (hasLines ? 1 : 0)) * rowH, wh = Math.max(3, rowH - 3);
+                    g.drawString(T("報獎"), textPen, 2, wy + (rowH - 12) / 2, font);
+                    var col = function (hex) { var v = S.hexToRgb(hex, [1, 0.84, 0.3]); return [v[0], v[1], v[2], 1]; };
+                    if (wp.meter) { fillRect(g, X(wp.meter.start), wy + wh - 2, X(wp.meter.countEnd) - X(wp.meter.start), 2, [1, 1, 1, 1]); }
+                    if (wp.big) {
+                        for (i = 0; i < wp.big.tiers.length; i++) {
+                            var tr = wp.big.tiers[i];
+                            fillRect(g, X(tr.start), wy, X(tr.end) - X(tr.start), wh - 3, col(tr.color));
+                        }
+                    }
+                    for (i = 0; i < wp.cards.length; i++) {
+                        fillRect(g, X(wp.cards[i].start), wy, X(wp.cards[i].end) - X(wp.cards[i].start), wh - 3, col(wp.cards[i].color));
+                    }
+                }
             } catch (e) { /* 繪製失敗就算了 */ }
         }
 
@@ -454,7 +470,7 @@
             var tl = parent.add("group");
             tl.preferredSize = [340, 120];
             tl.onDraw = drawTimeline;
-            tl.helpTip = T("藍 = 轉動、淺藍 = 減速、白線 = 停輪、灰 = 回彈、橘框 = 繞框、彩色 = 連線顯示");
+            tl.helpTip = T("藍 = 轉動、淺藍 = 減速、白線 = 停輪、灰 = 回彈、橘框 = 繞框、彩色 = 連線顯示、報獎列：色塊 = Big Win 各級 / 彩金 / Free Game，白線 = 跑分");
             st.timelines.push(tl);
             return tl;
         }
@@ -474,14 +490,20 @@
         tAdv.margins = IS_EC ? [4, 30, 4, 4] : [4, 6, 4, 4];
         var tabs = tAdv.add("tabbedpanel");
         tabs.alignChildren = ["fill", "top"];
+        // 英文分頁名稱比較長，8 個分頁排不下：用一個看不見的群組把面板撐寬（EffectCraft 的分頁列不會換行，也不看 tabbedpanel 的寬度）
+        if (S.lang !== "zh") {
+            var tabSpacer = tAdv.add("group");
+            tabSpacer.preferredSize = [IS_EC ? 530 : 480, 1];
+        }
         var tSym = tabs.add("tab", undefined, T("符號"));
         var tBoard = tabs.add("tab", undefined, T("盤面"));
         var tRhythm = tabs.add("tab", undefined, T("節奏"));
         var tReels = tabs.add("tab", undefined, T("各輪"));
         var tFrame = tabs.add("tab", undefined, T("繞框"));
         var tLines = tabs.add("tab", undefined, T("連線"));
+        var tWin = tabs.add("tab", undefined, T("報獎"));
         var tSet = tabs.add("tab", undefined, T("設定"));
-        var allTabs = [tSym, tBoard, tRhythm, tReels, tFrame, tLines, tSet];
+        var allTabs = [tSym, tBoard, tRhythm, tReels, tFrame, tLines, tWin, tSet];
         for (var ti = 0; ti < allTabs.length; ti++) {
             allTabs[ti].orientation = "column";
             allTabs[ti].alignChildren = ["left", "top"];
@@ -721,6 +743,57 @@
         var stCellAsset = pLineStyle.add("statictext", undefined, "");
         stCellAsset.preferredSize.width = 320;
 
+        // ================= 報獎 =================
+        var pW1 = section(tWin, T("贏分"));
+        var w1 = row(pW1);
+        numField(w1, T("贏分"), "win", "amount", "", { min: 0, chars: 8, labelWidth: 40, tip: T("總贏分；0 = 不跑分、不演 Big Win") });
+        numField(w1, T("押注"), "win", "bet", "", { min: 0, chars: 6, labelWidth: 30, tip: T("贏分 ÷ 押注 = 倍數，決定 Big Win 等級") });
+        var w2 = row(pW1);
+        numField(w2, T("小數"), "win", "decimals", T("位"), { min: 0, max: 4, integer: true, chars: 2, labelWidth: 40 });
+        textField(w2, T("前綴"), "win", "prefix", { chars: 4, labelWidth: 30, tip: T("數字前面加的符號，例如 $") });
+        var w3 = row(pW1);
+        checkField(w3, T("盤面下方跑分"), "win", "meter", { tip: T("一般贏分在盤面下方跑分；Big Win 時跟著一起跑") });
+        textField(w3, T("字樣"), "win", "meterLabel", { chars: 6, labelWidth: 30 });
+        var w4 = row(pW1);
+        numField(w4, T("跑分"), "win", "meterTime", T("秒"), { min: 0.05, labelWidth: 40, tip: T("沒到 Big Win 時，跑分要跑幾秒") });
+        textField(w4, T("位置"), "win", "meterPos", { chars: 9, labelWidth: 30, tip: T("跑分在目標合成的位置 x,y；空白 = 盤面正下方") });
+
+        var pW2 = section(tWin, "Big Win");
+        var w5 = row(pW2);
+        textField(w5, T("等級"), "win", "tiers", { chars: IS_EC ? 34 : 28, labelWidth: 40, tip: T("名稱@倍數，逗號分隔，可加顏色：BIG WIN@10, MEGA WIN@25, SUPER WIN@50#FF4FD8") });
+        var w6 = row(pW2);
+        numField(w6, T("每級"), "win", "tierTime", T("秒"), { min: 0.2, labelWidth: 40, tip: T("跑分每升一級花幾秒") });
+        numField(w6, T("先秀連線"), "win", "bigDelay", T("秒"), { min: 0, labelWidth: 52, tip: T("Big Win 出現前先讓連線秀幾秒") });
+        var w7 = row(pW2);
+        numField(w7, T("停留"), "win", "hold", T("秒"), { min: 0, labelWidth: 40, tip: T("跑完停留幾秒（Big Win / 彩金）") });
+        numField(w7, T("壓暗"), "win", "dim", "%", { min: 0, max: 100, labelWidth: 30 });
+        var w8 = row(pW2);
+        numField(w8, T("金幣"), "win", "coins", T("coin\u0004顆"), { min: 0, max: 200, integer: true, chars: 3, labelWidth: 40, tip: T("噴幾顆金幣（Big Win / 彩金），0 = 不噴") });
+        checkField(w8, T("光芒"), "win", "rays", { tip: T("背後旋轉的光芒") });
+
+        var pW3 = section(tWin, T("彩金 / Free Game"));
+        var w9 = row(pW3);
+        textField(w9, T("彩金"), "win", "jpName", { chars: 7, labelWidth: 40, tip: T("獎項名稱，例如 GRAND / MAJOR / MINOR / MINI；空白 = 不演") });
+        numField(w9, T("金額"), "win", "jpAmount", "", { min: 0, chars: 8, labelWidth: 30 });
+        var w10 = row(pW3);
+        numField(w10, T("跑分"), "win", "jpTime", T("秒"), { min: 0.2, labelWidth: 40 });
+        var w11 = row(pW3);
+        numField(w11, "Free Game", "win", "fgCount", T("場"), { min: 0, integer: true, chars: 3, tip: T("0 = 不演 Free Game 字卡") });
+        textField(w11, T("標題"), "win", "fgTitle", { chars: 10, labelWidth: 30 });
+        var w12 = row(pW3);
+        numField(w12, T("停留"), "win", "fgTime", T("秒"), { min: 0.5, labelWidth: 40 });
+
+        var pW4 = section(tWin, T("順序 / 外觀"));
+        var w13 = row(pW4);
+        textField(w13, T("順序"), "win", "order", { chars: 10, labelWidth: 40, tip: T("jp = 彩金、win = 贏分、fg = Free Game，逗號分隔") });
+        numField(w13, T("停妥後"), "win", "delay", T("秒"), { min: 0, labelWidth: 40 });
+        var w14 = row(pW4);
+        numField(w14, T("間隔"), "win", "gap", T("秒"), { min: 0, labelWidth: 40, tip: T("每一段之間停多久") });
+        numField(w14, T("字級"), "win", "size", "px", { min: 0, integer: true, chars: 4, labelWidth: 30, tip: T("標題字級；0 = 依盤面大小自動") });
+        var w15 = row(pW4);
+        textField(w15, T("字型"), "win", "font", { chars: 16, labelWidth: 40, tip: T("字型的 PostScript 名稱，例如 Arial-BoldMT；空白 = AE 預設") });
+        hint(tWin, T("報獎會建在和目標合成一樣大的「_Win」合成，放在盤面圖層上面；標題、跑分、金幣都是一般圖層，可以再換成美術圖。"));
+
         // ================= 設定 =================
         var pLang = section(tSet, T("介面語言"));
         var lg1 = row(pLang);
@@ -806,7 +879,19 @@
         var qSummary = pQ3.add("statictext", undefined, "", { multiline: true });
         qSummary.preferredSize = [330, (IS_EC ? 5 : 4) * LINE_H];
         addTimeline(pQ3);
-        hint(tQuick, T("最後按下方「▶ 建立假轉」。要細調節奏、繞框、連線樣式，到「進階」。"));
+
+        var pQ4 = section(tQuick, T("④ 報獎"));
+        var q8 = row(pQ4);
+        numField(q8, T("贏分"), "win", "amount", "", { min: 0, chars: 8, labelWidth: 30, tip: T("總贏分；0 = 不跑分、不演 Big Win") });
+        numField(q8, T("押注"), "win", "bet", "", { min: 0, chars: 6, labelWidth: 30, tip: T("贏分 ÷ 押注 = 倍數，決定 Big Win 等級（門檻在「進階 > 報獎」）") });
+        var q9 = row(pQ4);
+        numField(q9, "Free Game", "win", "fgCount", T("場"), { min: 0, integer: true, chars: 3, tip: T("0 = 不演 Free Game 字卡") });
+        var q10 = row(pQ4);
+        textField(q10, T("彩金"), "win", "jpName", { chars: 7, labelWidth: 30, tip: T("獎項名稱，例如 GRAND / MAJOR / MINOR / MINI；空白 = 不演") });
+        numField(q10, T("金額"), "win", "jpAmount", "", { min: 0, chars: 8, labelWidth: 30 });
+        var qWin = pQ4.add("statictext", undefined, "", { multiline: true });
+        qWin.preferredSize = [330, (IS_EC ? 3 : 2) * LINE_H];
+        hint(tQuick, T("最後按下方「▶ 建立假轉」。要細調節奏、繞框、連線樣式、報獎，到「進階」。"));
 
         // ================= 底部動作 =================
         var gAct = row(win);
@@ -1679,7 +1764,7 @@
         }
 
         function refreshQuick() {
-            if (!qSummary) { return; }  // 快速頁還沒建好
+            if (!qWin) { return; }  // 快速頁還沒建好
             var L = st.cfg.layout, key = recipeKey();
             setMultiline(qSymInfo, st.cfg.symbols.length ? T("{0} 個符號：{1}", st.cfg.symbols.length, names().join("  ")) : T("還沒有符號：先匯入符號圖檔資料夾"), 330, true);
             setMultiline(qBoard, st.cfg.symbols.length ? S.board.toText(st.cfg.endBoard, L.rows) : T("（匯入符號後會先亂數填滿，再改成你要的結果）"), 330, true);
@@ -1700,6 +1785,8 @@
                 lines.push(T("連線 {0} 條；全部停妥 {1} 秒、演出到 {2} 秒", st.cfg.lines.length, fmt2(plan.allSettled), fmt2(plan.endTime)));
             }
             setMultiline(qSummary, lines.join("\n"), 330, true);
+            var wl = plan && !plan.errors.length ? S.win.describe(plan.win) : [];
+            setMultiline(qWin, wl.length ? wl.join("\n") : T("不演報獎（贏分 0、沒有 Free Game、沒有彩金）"), 330, true);
         }
 
         ddRecipe.onChange = function () { applyQuick(); };

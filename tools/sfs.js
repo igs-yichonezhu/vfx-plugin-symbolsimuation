@@ -55,6 +55,14 @@ Hold & Spin 重轉（每格各自轉、落下就鎖住、多回合；Link 系列
                                   例：--add 1,2,3,2,1:5:0.3+1.2；線型裡的 0 = 這輪不框
                                   連數寫 box = 只框格子不畫線（Scatter）：--add 2,0,1,0,2:box
 
+報獎（全部停妥後：一般贏分跑分 / Big Win 分級 / 彩金字卡 / Free Game 字卡）
+  win <preset> [--amount 贏分] [--bet 押注] [--fg 場數] [--jp MAJOR:50000|off] [--tiers "BIG WIN@10,MEGA WIN@25"]
+              [--order jp,win,fg] [--off]
+                                  設定報獎並印出時間表；贏分 ÷ 押注 = 倍數，到門檻就演 Big Win（跑分途中逐級升級）
+                                  其他參數用 set：win.meter win.meterPos=x,y win.tierTime win.bigDelay win.hold win.dim
+                                  win.coins win.rays win.jpTime win.fgTitle win.fgTime win.delay win.gap win.size win.font
+                                  win.decimals win.prefix=$
+
 檢查 / 預覽
   check <preset> [--fps 30] [--json]
                                   驗證 + 各輪時間表 + 文字時間軸 + 標記（音效對點）
@@ -453,7 +461,8 @@ function cmdShow(file) {
       "，開始時間 " + cfg.spin.startTime + " 秒，位置 " + (L.position ? L.position.join(", ") : "置中"));
     console.log("符號：" + cfg.symbols.map((s) => s.name + (s.filler ? "" : "*") + (s.scale !== 100 ? "(" + s.scale + "%)" : "")).join(" ") +
       "   （* = 不當填充）   空格符號：" + (cfg.hs.blank || "（未設定）"));
-    console.log(hsRhythmLine(cfg) + "\n");
+    console.log(hsRhythmLine(cfg));
+    console.log(winConfigLine(cfg) + "\n");
     printHs(cfg);
     return;
   }
@@ -471,6 +480,7 @@ function cmdShow(file) {
     console.log("\n連線：");
     cfg.lines.forEach((l, i) => console.log("  " + (i + 1) + ". 線型 " + l.pattern + (l.boxOnly ? " 只框格子" : " 連 " + l.count) + " 顯示 " + l.shows + (l.color ? " " + l.color : "")));
   }
+  console.log("\n" + winConfigLine(cfg));
 }
 
 function printReels(cfg) {
@@ -680,6 +690,8 @@ function asciiTimeline(plan, width) {
     pl.shows.forEach((s) => { for (let x = X(s.start); x <= X(s.end); x++) line[x] = String((i + 1) % 10); });
     rows.push(pad("L" + (i + 1), 6) + line.join(""));
   });
+  const wr = winRow(plan, X, width);
+  if (wr) rows.push(wr);
   const axis = Array(width).fill("-");
   const labels = Array(width).fill(" ");
   for (let s = 0; T0 + s <= T1; s += 1) {
@@ -689,7 +701,38 @@ function asciiTimeline(plan, width) {
   }
   rows.push(pad("", 6) + axis.join(""));
   rows.push(pad("秒", 6) + labels.join(""));
-  return rows.join("\n") + "\n      = 轉動  * 繞框  ~ 減速  | 停輪  . 回彈  數字 = 連線顯示";
+  return rows.join("\n") + "\n      = 轉動  * 繞框  ~ 減速  | 停輪  . 回彈  數字 = 連線顯示" + (wr ? WIN_LEGEND : "");
+}
+
+// 報獎列：$ = 跑分、Big Win 各級用名稱開頭字母（B / M / S…）、J = 彩金字卡、F = Free Game 字卡
+const WIN_LEGEND = "\n      報獎：$ 跑分  B/M/S… Big Win 各級  J 彩金  F Free Game";
+function winRow(plan, X, width) {
+  const w = plan.win;
+  if (!w || !w.any) return null;
+  const line = Array(width).fill(" ");
+  const span = (a, b, ch) => { for (let x = X(a); x <= X(b); x++) line[x] = ch; };
+  if (w.meter) span(w.meter.start, w.meter.countEnd, "$");
+  if (w.big) w.big.tiers.forEach((t) => span(t.start, t.end, (t.name.trim().charAt(0) || "B").toUpperCase()));
+  w.cards.forEach((c) => span(c.start, c.end, c.kind === "jp" ? "J" : "F"));
+  return pad("WIN", 6) + line.join("");
+}
+
+function printWin(plan) {
+  const lines = S.win.describe(plan.win);
+  if (!lines.length) { console.log("報獎：不演（贏分 0、沒有 Free Game、沒有彩金；用 win 指令設定）"); return; }
+  console.log("報獎（目標合成時間）：\n  " + lines.join("\n  "));
+}
+
+function winJson(plan) {
+  const w = plan && plan.win;
+  if (!w || !w.any) return null;
+  return {
+    amount: w.amount, bet: w.bet, mult: r2(w.mult),
+    meter: w.meter ? { start: w.meter.start, countEnd: w.meter.countEnd } : null,
+    big: w.big ? { start: w.big.start, countEnd: w.big.countEnd, end: w.big.end, tiers: w.big.tiers.map((t) => ({ name: t.name, at: t.at, start: t.start })) } : null,
+    cards: w.cards.map((c) => ({ kind: c.kind, title: c.title, start: c.start, end: c.end, amount: c.kind === "jp" ? c.V[1] : undefined, count: c.count })),
+    end: w.end,
+  };
 }
 
 // Hold & Spin 文字時間軸：每格一行
@@ -715,6 +758,8 @@ function asciiTimelineHS(plan, width) {
     cp.spins.forEach((sp) => { line[X(sp.stop)] = "|"; });
     rows.push(pad("C" + cp.tag, 6) + line.join(""));
   });
+  const wr = winRow(plan, X, width);
+  if (wr) rows.push(wr);
   const axis = Array(width).fill("-");
   const labels = Array(width).fill(" ");
   for (let s = 0; T0 + s <= T1; s += 1) {
@@ -724,7 +769,7 @@ function asciiTimelineHS(plan, width) {
   }
   rows.push(pad("", 6) + axis.join(""));
   rows.push(pad("秒", 6) + labels.join(""));
-  return rows.join("\n") + "\n      = 轉動  * 繞框  ~ 減速  | 停下  . 回彈  # 鎖住（格子 C列-欄）";
+  return rows.join("\n") + "\n      = 轉動  * 繞框  ~ 減速  | 停下  . 回彈  # 鎖住（格子 C列-欄）" + (wr ? WIN_LEGEND : "");
 }
 
 function checkHS(cfg, plan, fps, opt, all) {
@@ -740,6 +785,7 @@ function checkHS(cfg, plan, fps, opt, all) {
       frames: plan ? plan.frames.map((f) => ({ cell: plan.cells[f.cell].tag, start: f.start, end: f.end })) : [],
       markers: plan ? plan.markers.map((m) => ({ t: m.t, frame: Math.round(m.t * fps), label: m.label })) : [],
       finalBoard: plan ? plan.board : null, allSettled: plan ? plan.allSettled : null, endTime: plan ? plan.endTime : null,
+      win: winJson(plan),
     }, null, 2));
     process.exit(all.length ? 1 : 0);
   }
@@ -765,9 +811,53 @@ function checkHS(cfg, plan, fps, opt, all) {
   });
   console.log("\n最後盤面：\n" + indent(S.board.toText(plan.board, L.rows)));
   console.log("全部停妥 " + r2(plan.allSettled - T0) + " 秒，演出結束 " + r2(plan.endTime - T0) + " 秒");
+  printWin(plan);
   console.log("\n" + asciiTimelineHS(plan, 64));
   console.log("\n標記（目標合成時間，可對音效）：");
   plan.markers.forEach((m) => console.log("  " + pad(r2(m.t).toFixed(2) + "s", 8) + pad("f" + Math.round(m.t * fps), 7) + m.label));
+}
+
+function winConfigLine(cfg) {
+  const W = cfg.win, tiers = S.win.parseTiers(W.tiers).tiers;
+  return "報獎：贏分 " + S.win.format(W.amount, W.decimals, W.prefix) + "、押注 " + W.bet +
+    "｜Big Win 門檻 " + (tiers.length ? tiers.map((t) => t.name + " " + t.at + " 倍").join("、") : "（無）") +
+    "｜Free Game " + W.fgCount + " 場｜彩金 " + (W.jpName ? W.jpName + " " + S.win.format(W.jpAmount, W.decimals, W.prefix) : "-") +
+    "｜順序 " + S.win.parseOrder(W.order).join(" → ");
+}
+
+function cmdWin(file, opt) {
+  let cfg = load(file);
+  const W = cfg.win;
+  const num = (k, v) => {
+    const n = Number(String(v).replace(/,/g, ""));
+    if (v === true || isNaN(n) || n < 0) fail("--" + k + " 要是 0 以上的數字：" + v);
+    return n;
+  };
+  if (opt.off) { W.amount = 0; W.fgCount = 0; W.jpName = ""; }
+  if (opt.amount !== undefined) W.amount = num("amount", opt.amount);
+  if (opt.bet !== undefined) W.bet = num("bet", opt.bet);
+  if (opt.fg !== undefined) W.fgCount = num("fg", opt.fg);
+  if (opt.jp !== undefined) {
+    if (opt.jp === true || /^off$/i.test(String(opt.jp))) W.jpName = "";
+    else {
+      const m = /^([^:=]+)(?:[:=](.+))?$/.exec(String(opt.jp).trim());
+      if (!m) fail("--jp 的格式是 名稱:金額，例如 MAJOR:50000");
+      W.jpName = m[1].trim();
+      if (m[2] !== undefined) W.jpAmount = num("jp", m[2]);
+    }
+  }
+  if (opt.tiers !== undefined) W.tiers = String(opt.tiers);
+  if (opt.order !== undefined) W.order = String(opt.order);
+  cfg = S.normalizeConfig(cfg);
+  const errs = S.validateConfig(cfg);
+  if (errs.length) fail(errs.join("\n"));
+  save(file, cfg);
+  const fps = Number(opt.fps || cfg.layout.newCompFps || 30);
+  const plan = S.computePlan(cfg, fps);
+  if (plan.errors.length) fail(plan.errors.join("\n"));
+  console.log(winConfigLine(cfg));
+  printWin(plan);
+  console.log("演出結束 " + r2(plan.endTime) + " 秒（目標合成時間）");
 }
 
 function cmdCheck(file, opt) {
@@ -785,6 +875,7 @@ function cmdCheck(file, opt) {
       lines: plan ? plan.lines.map((l) => ({ line: l.index + 1, shows: l.shows })) : [],
       markers: plan ? plan.markers.map((m) => ({ t: m.t, frame: Math.round(m.t * fps), label: m.label })) : [],
       allSettled: plan ? plan.allSettled : null, endTime: plan ? plan.endTime : null,
+      win: winJson(plan),
     }, null, 2));
     process.exit(all.length ? 1 : 0);
   }
@@ -799,6 +890,7 @@ function cmdCheck(file, opt) {
       pad(rp.fill, 6) + pad(r2(rp.speed / plan.pitch) + " 格/秒", 13) + (fr ? r2(fr.start - T0) + " → " + r2(fr.end - T0) : "-"));
   });
   console.log("\n全部停妥 " + r2(plan.allSettled - T0) + " 秒，演出結束 " + r2(plan.endTime - T0) + " 秒");
+  printWin(plan);
   console.log("\n" + asciiTimeline(plan, 64));
   console.log("\n標記（目標合成時間，可對音效）：");
   plan.markers.forEach((m) => console.log("  " + pad(r2(m.t).toFixed(2) + "s", 8) + pad("f" + Math.round(m.t * fps), 7) + m.label));
@@ -834,11 +926,18 @@ function sceneForHS(cfg, plan, fps, shots, outScale) {
       const dt = t - p.t;
       return { cx: p.x, cy: p.y, name: p.name, scale: dt < up ? 1 + (big - 1) * dt / up : big - (big - 1) * (dt - up) / down };
     });
-    return { t, label, reels: [], cells, frames: frameOverlays(plan, F, L, t), wins, lines: [] };
+    return { t, label, reels: [], cells, frames: frameOverlays(plan, F, L, t), wins, lines: [], win: S.win.sample(plan.win, t) };
   });
-  return { width: plan.boardW, height: plan.boardH, margin: plan.margin, reelW: L.cellW, reelH: L.cellH, cellW: L.cellW, cellH: L.cellH,
+  return { width: plan.boardW, height: plan.boardH + winExtra(plan), margin: plan.margin, reelW: L.cellW, reelH: L.cellH, cellW: L.cellW, cellH: L.cellH,
     pitch: plan.pitch, scaleMode: L.scaleMode, symbolScale: L.symbolScale, symbolScales: S.symbolScales(cfg), symbols, fps, outScale: outScale || 1,
     reels: [], cells: plan.cells.map((cp) => ({ x: cp.x, y: cp.y, strip: cp.strip.map((s) => s.name) })), frames, plan };
+}
+
+// 跑分在盤面合成下緣外面時，預覽畫布往下加高
+function winExtra(plan) {
+  const w = plan.win;
+  if (!w || !w.meter) return 0;
+  return Math.max(0, Math.ceil(w.pos.meter[1] + w.meterSize - plan.boardH));
 }
 
 function sceneFor(cfg, fps, shots, outScale) {
@@ -881,18 +980,21 @@ function sceneFor(cfg, fps, shots, outScale) {
       return { points: pl.points, boxes: LS.boxes || pl.highlight ? pl.cells.map((c) => S.cellCenter(L, c[0], c[1])) : [], color: S.rgbToHex(pl.color),
         width: LS.width, boxW: LS.boxWidth, cellW: L.cellW, cellH: L.cellH, progress: draw > 0 ? Math.min(1, (t - s.start) / draw) : 1 };
     });
-    return { t, label, reels, frames: frameOv, wins, lines };
+    return { t, label, reels, frames: frameOv, wins, lines, win: S.win.sample(plan.win, t) };
   });
-  return { width: plan.boardW, height: plan.boardH, margin: plan.margin, reelW: L.cellW, reelH: plan.reelH, cellW: L.cellW, cellH: L.cellH,
+  return { width: plan.boardW, height: plan.boardH + winExtra(plan), margin: plan.margin, reelW: L.cellW, reelH: plan.reelH, cellW: L.cellW, cellH: L.cellH,
     pitch: plan.pitch, scaleMode: L.scaleMode, symbolScale: L.symbolScale, symbolScales: S.symbolScales(cfg), symbols, fps, outScale: outScale || 1,
     reels: plan.reels.map((rp) => ({ x: rp.x, strip: rp.strip.map((s) => s.name) })), frames, plan };
 }
 
+// 報獎的標記不直接拍（標題剛要彈出），改用 plan.win.shots（彈出後 / 跑完後）
 function keyShots(plan) {
-  if (plan.mode === "holdspin") return S.hs.shots(plan);
-  const shots = [];
+  const w = plan.win, winShots = w && w.any ? w.shots : [];
+  const winOnly = (label) => !!w && label.split(" / ").every((l) => w.labels.indexOf(l) >= 0);
+  if (plan.mode === "holdspin") return S.hs.shots(plan).concat(winShots).sort((a, b) => a.t - b.t);
+  const shots = winShots.slice();
   plan.markers.forEach((m) => {
-    if (/^LINE /.test(m.label)) return;
+    if (/^LINE /.test(m.label) || winOnly(m.label)) return;
     shots.push({ t: m.t, label: m.label });
     if (m.label === "SPIN") {
       const first = Math.min(...plan.reels.map((r) => r.stopTime));
@@ -1242,6 +1344,7 @@ function main() {
     case "regen": return cmdRegen(pos[0]);
     case "suggest": return cmdSuggest(pos[0], opt);
     case "lines": return cmdLines(pos[0], opt);
+    case "win": return cmdWin(pos[0], opt);
     case "check": return cmdCheck(pos[0], opt);
     case "render": return cmdRender(pos[0], opt);
     case "symbols-sheet": return cmdSymbolsSheet(pos[0], pos[1]);

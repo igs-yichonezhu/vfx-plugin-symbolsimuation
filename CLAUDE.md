@@ -3,6 +3,7 @@
 After Effects 老虎機假轉工具：ScriptUI 面板 + 給 agent 用的命令列。
 
 - 開發人員丟符號圖 / 盤面圖、要做假轉或期待感設計時：用 `slot-fake-spin` skill（`.claude/skills/slot-fake-spin/`），節奏設計 / 審查可交給 `slot-anticipation-director` agent。
+- 開發人員丟競品影片 + 整包素材、要「照競品做假廣告」時：用 `slot-ad-recreate` skill（`.claude/skills/slot-ad-recreate/`），直接先做完第一版 + 對比影片。
 - 工作檔放 `work/<案子>/`（已在 .gitignore）。
 
 ## 開發

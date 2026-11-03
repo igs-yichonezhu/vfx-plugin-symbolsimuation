@@ -131,7 +131,7 @@ test("EffectCraft：面板自動用英文，看得到的文字沒有中文，完
   const main = ctx.app.project.items.addComp("Main", 1920, 1080, 1, 12, 30);
   ctx.app.project.activeItem = main;
   const panel = loadPanel(ctx);
-  deq(tabTitles(panel), ["Quick", "Advanced", "Symbols", "Board", "Rhythm", "Reels", "Frame", "Lines", "Settings"]);
+  deq(tabTitles(panel), ["Quick", "Advanced", "Symbols", "Board", "Rhythm", "Reels", "Frame", "Lines", "Win", "Settings"]);
   ctx.__dialogResult = new ctx.Folder(SYMBOL_DIR);
   click(byText(panel, "button", "Import Folder..."));
   click(byText(panel, "button", "▶ Build Fake Spin"));
@@ -159,7 +159,7 @@ test("設定頁切換語言：重建面板、停在設定頁、記住選擇、�
 
   pickLang(panel, 2);
   assert.strictEqual(ctx.app.settings.getSetting("SlotFakeSpin", "language"), "en");
-  deq(tabTitles(panel), ["Quick", "Advanced", "Symbols", "Board", "Rhythm", "Reels", "Frame", "Lines", "Settings"]);
+  deq(tabTitles(panel), ["Quick", "Advanced", "Symbols", "Board", "Rhythm", "Reels", "Frame", "Lines", "Win", "Settings"]);
   const tps = []; walk(panel, (el) => { if (el.type === "tabbedpanel") tps.push(el); });
   assert.strictEqual(tps[0].selection.text, "Advanced");
   assert.strictEqual(tps[1].selection.text, "Settings");

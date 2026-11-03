@@ -1,6 +1,6 @@
 ---
 name: slot-fake-spin
-description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、或美術的遊戲畫面 PSD，要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線，或 Link 系列的 Hold & Spin 重轉（格子各自轉、金幣鎖住、多回合、SPINS REMAINING），或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好、存成 .aep（沒有 AE 時用 EffectCraft 建出盤面、檢查畫面與影片，或打包成 aep-kit 交給有 AE 的人一鍵存出 .aep）。
+description: 老虎機假轉（fake spin）期待感導演。開發人員丟符號圖（圖騰）和盤面圖、或美術的遊戲畫面 PSD，要在 After Effects 做假轉、設計轉輪節奏 / 停輪順序 / 期待感 / 繞框 / 連線、報獎（跑分、Big Win / Mega Win 分級、彩金、Free Game 字卡），或 Link 系列的 Hold & Spin 重轉（格子各自轉、金幣鎖住、多回合、SPINS REMAINING），或提到 SlotFakeSpin、假轉、期待感、聽牌、Free Game 觸發演出時使用。會讀圖轉成盤面、設計節奏、出預覽，並直接驅動 AE 建好、存成 .aep（沒有 AE 時用 EffectCraft 建出盤面、檢查畫面與影片，或打包成 aep-kit 交給有 AE 的人一鍵存出 .aep）。
 ---
 
 # SlotFakeSpin：老虎機假轉
@@ -74,13 +74,14 @@ node tools/sfs.js hs-board work/<案子>/preset.json --start "- - 200 / - - MINI
 2. 依意圖選 [anticipation.md](reference/anticipation.md) 第 3 節的配方，用 `set` 調快速節奏、`suggest P --apply` 寫入期待輪。
 3. 需要「一層比一層強」或特殊節奏時，用 `reel` 逐輪微調（例如最後一輪 `stop=+0.3`、`frameSpeed=28`）。
 4. 連線：`lines P --clear --detect`（Scatter 觸發會自動變成「只框格子」），再用 `set` 調 `lineGen.*` / `lineStyle.*`。
+5. 報獎（要演中獎結果時）：`win P --amount <贏分> --bet <押注> [--fg <場數>] [--jp MAJOR:<金額>]`。倍數到 Big Win 門檻（預設 10 / 25 / 50 倍）就演 Big Win，跑分途中逐級升級；觸發 Free Game 的盤面配 `--fg`，彩金滾輪停在獎項上配 `--jp`。贏分、押注、場數不知道就問；遊戲畫面已有 WIN 框時用 `set P win.meterPos=x,y` 對齊。細節見 [cli.md](reference/cli.md)「報獎」。
 
 ### 5. 自己先檢查
 ```
 node tools/sfs.js check P
 node tools/sfs.js render P --sheet work/<案子>/keys.png --scale 0.4
 ```
-讀 `check` 的時間表、文字時間軸、標記；用 Read 看 `keys.png`（開始、轉動中、每輪停輪、繞框、停妥、連線）。
+讀 `check` 的時間表、文字時間軸、標記；用 Read 看 `keys.png`（開始、轉動中、每輪停輪、繞框、停妥、連線、報獎各級 / 字卡）。
 照 anticipation.md 第 4 節的清單逐項確認，有問題自己改到好再給開發人員看。
 
 ### 6. 給開發人員看、來回調整
@@ -130,7 +131,8 @@ node tools/sfs.js ec P --project work/<案子>/<專案>.ecproj --comp "<合成�
 告訴開發人員：
 - AE 裡建好的盤面合成名稱，以及要再改時可以在 SlotFakeSpin 面板選取盤面圖層，按「讀取選取盤面」。
 - 設定檔路徑（面板可用「開設定…」打開）。
-- **音效對點表**：`ae` / `check` 列出的標記（秒 + 影格）。Hold & Spin 是每回合起轉、每格停下 / 鎖住、剩餘次數重設、全滿。
+- **音效對點表**：`ae` / `check` 列出的標記（秒 + 影格）。Hold & Spin 是每回合起轉、每格停下 / 鎖住、剩餘次數重設、全滿。有報獎時另有 BIG WIN / MEGA WIN…（升級音）、WIN COUNT END（跑分結束重音）、JACKPOT、FREE GAMES。
+- 有報獎時：目標合成裡盤面圖層上方的 `Win` 圖層（`<盤面合成>_Win`），標題 / 跑分 / 金幣都可以換成美術圖。
 
 ## 原則
 - 先確認盤面正確，再談節奏；盤面讀錯，整段都要重做。
